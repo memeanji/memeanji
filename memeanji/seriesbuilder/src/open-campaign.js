@@ -90,8 +90,26 @@ async function runFlow(page) {
   await page.screenshot({ path: PATHS.step1, fullPage: true });
 
   console.log(`[STEP] 광고계정 이동: act=${AD_ACCOUNT_ID}`);
-  await page.goto(`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${AD_ACCOUNT_ID}`, { waitUntil: 'domcontentloaded' });
-  await page.locator('[role="main"]').getByRole('button', { name: /campaigns|캠페인/i }).first().waitFor({ timeout: 60000 });
+  const targetUrl = `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${AD_ACCOUNT_ID}`;
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForTimeout(5000);
+
+  console.log('[DEBUG] URL:', page.url());
+  console.log('[DEBUG] TITLE:', await page.title());
+
+  const campaignReady = page
+    .getByRole('tab', { name: /캠페인|campaigns/i })
+    .or(page.getByRole('link', { name: /캠페인|campaigns/i }))
+    .or(page.getByText(/캠페인|campaigns/i).first())
+    .or(page.getByRole('grid').first())
+    .or(page.getByRole('table').first());
+
+  const isCampaignUrl = /\/campaigns/i.test(page.url());
+  if (!isCampaignUrl) {
+    await campaignReady.first().waitFor({ timeout: 60000 });
+  }
+
   await page.screenshot({ path: PATHS.step2, fullPage: true });
 
   const exactCampaignRegex = new RegExp(`^${CAMPAIGN_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
