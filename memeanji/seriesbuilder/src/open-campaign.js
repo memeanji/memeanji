@@ -300,9 +300,9 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
 
 
 async function updateDateAndTimeBeforeContinue(page) {
-  await pause(page, '날짜/시간 영역 이동 전 대기', 1500);
+  await pause(page, '날짜/시간 영역 이동 전 대기', 3000);
   await page.mouse.wheel(0, 500);
-  await pause(page, '스크롤 후 날짜/시간 영역 대기', 1000);
+  await pause(page, '스크롤 후 날짜/시간 영역 대기', 3000);
 
   let dateInput = null;
   for (let attempt = 1; attempt <= 6; attempt += 1) {
@@ -339,8 +339,9 @@ async function updateDateAndTimeBeforeContinue(page) {
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
     await page.keyboard.press('Backspace');
     await page.keyboard.type(nextDateText, { delay: 50 });
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000);
     console.log('[DEBUG] updated date value:', await dateInput.inputValue().catch(() => ''));
+    await pause(page, '날짜 변경 반영 대기', 2000);
   } else {
     console.log('[DEBUG] 날짜 파싱 실패, 기존 값 유지:', currentDateText);
   }
@@ -362,7 +363,8 @@ async function updateDateAndTimeBeforeContinue(page) {
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
       await page.keyboard.press('Backspace');
       await page.keyboard.type('05:00', { delay: 50 });
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(1500);
+      await pause(page, '시간 변경 반영 대기', 2000);
       break;
     }
   }
@@ -484,29 +486,50 @@ async function setDuplicateCount(page, count = 5) {
 }
 
 async function clickContinueButtonOnly(page) {
-  const continueCandidates = await page.locator('div, span, button').filter({ hasText: /^계속$/ }).elementHandles();
-
   let continueButton = null;
-  for (const el of continueCandidates) {
-    const text = (await el.innerText().catch(() => '')).trim();
-    const box = await el.boundingBox();
-    console.log('[DEBUG] continue candidate:', { text, box });
 
-    if (text === '계속' && box && box.x > 1000 && box.y > 350) {
-      continueButton = el;
-      break;
+  for (let attempt = 1; attempt <= 8 && !continueButton; attempt += 1) {
+    const continueCandidates = await page
+      .locator('div, span, button')
+      .filter({ hasText: /^계속$/ })
+      .elementHandles();
+
+    for (const el of continueCandidates) {
+      const text = (await el.innerText().catch(() => '')).trim();
+      const box = await el.boundingBox();
+      console.log('[DEBUG] continue candidate:', { attempt, text, box });
+
+      if (text !== '계속' || !box) continue;
+      if (box.x > 900 && box.y > 300 && box.y < 700) {
+        continueButton = el;
+        break;
+      }
+    }
+
+    if (!continueButton) {
+      console.log(`[WAIT] 계속 버튼 탐색 재시도 ${attempt}/8`);
+      await page.mouse.wheel(0, 120);
+      await page.waitForTimeout(2000);
     }
   }
 
   if (!continueButton) {
+    await debugDump(page, 'continue button not found after retries');
     throw new Error('계속 버튼을 찾지 못했습니다.');
   }
 
   const box = await continueButton.boundingBox();
   if (!box) throw new Error('계속 버튼 좌표를 가져오지 못했습니다.');
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForTimeout(3000);
+
+  await continueButton.click().catch(async () => {
+    await continueButton.click({ force: true });
+  }).catch(async () => {
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  });
+
+  await page.waitForTimeout(3500);
 }
+
 
 async function fillAdsetBudgetInModalOnly(page, budgetValue) {
   const modalRoot = page.locator('[role="dialog"]').filter({ has: page.getByText(/광고 세트|ad set/i) }).first();
