@@ -160,9 +160,10 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   const adsetNameInput = page
     .locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb, input[type="text"][value]')
     .first();
-  const visible = await adsetNameInput.isVisible({ timeout: 30000 }).catch(() => false);
 
-  if (!visible) {
+  try {
+    await adsetNameInput.waitFor({ state: 'visible', timeout: 30000 });
+  } catch {
     const modalText = (await page.locator('[role="dialog"]').first().innerText().catch(() => '')).slice(0, 500);
     console.log('[DEBUG] adset name input timeout URL:', page.url());
     console.log('[DEBUG] adset name input timeout TITLE:', await page.title());
@@ -170,8 +171,8 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
     throw new Error('광고 세트 이름 input을 찾지 못했습니다.');
   }
 
-  await adsetNameInput.click();
-  await page.keyboard.press('Control+A');
+  await adsetNameInput.click({ timeout: 10000 });
+  await adsetNameInput.press('Control+A');
   await page.keyboard.press('Backspace');
   await adsetNameInput.type(adsetName, { delay: 30 });
 
@@ -225,15 +226,28 @@ async function fillAdsetBudgetInModalOnly(page, budgetValue) {
 }
 
 async function enterAdsetFlow(page) {
-  // 광고 세트 라디오를 강제 탐색하지 않고, 실제 이름 input 등장 여부로 판단
-  const adsetNameInput = page.locator('input[placeholder="광고 세트 이름 지정"]').first();
-  const ready = await adsetNameInput.isVisible({ timeout: 30000 }).catch(() => false);
+  const adsetNameInput = page
+    .locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb')
+    .first();
 
-  if (!ready) {
-    const modalText = (await page.locator('[role="dialog"]').first().innerText().catch(() => '')).slice(0, 500);
+  const inputCount = await page
+    .locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb')
+    .count();
+
+  try {
+    await adsetNameInput.waitFor({ state: 'visible', timeout: 30000 });
+    return;
+  } catch {
+    const placeholders = await page
+      .locator('input[placeholder]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('placeholder') || '').filter(Boolean))
+      .catch(() => []);
+
     console.log('[DEBUG] enterAdsetFlow timeout URL:', page.url());
     console.log('[DEBUG] enterAdsetFlow timeout TITLE:', await page.title());
-    console.log('[DEBUG] enterAdsetFlow modal text:', modalText);
+    console.log('[DEBUG] enterAdsetFlow input placeholders:', placeholders);
+    console.log('[DEBUG] enterAdsetFlow matched input count:', inputCount);
+
     throw new Error('광고 세트 생성 모달(광고 세트 이름 지정 input)을 찾지 못했습니다.');
   }
 }
