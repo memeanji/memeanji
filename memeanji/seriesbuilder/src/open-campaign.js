@@ -472,11 +472,38 @@ async function openDuplicateMenuViaIcons(page) {
     await pause(page, '좌표 fallback 점3개 클릭 후 대기', 5000);
   }
 
-  const duplicateMenu = page.locator('div, span, button').filter({ hasText: /^복제$/ }).first();
-  await duplicateMenu.waitFor({ state: 'visible', timeout: 30000 });
-  await pause(page, '복제 메뉴 확인 후 대기', 3000);
-  await duplicateMenu.click({ force: true });
-  await pause(page, '복제 클릭 후 대기', 5000);
+  const menuContainer = page.locator('div').filter({ hasText: /이 광고에 대한 작업/ }).first();
+  const menuVisible = await menuContainer.isVisible({ timeout: 30000 }).catch(() => false);
+
+  if (menuVisible) {
+    const menuText = await menuContainer.innerText().catch(() => '');
+    console.log('[DEBUG] action menu text:', menuText);
+
+    const duplicateItem = menuContainer
+      .locator('div, span, button')
+      .filter({ hasText: /^복제$/ })
+      .first();
+
+    const duplicateVisible = await duplicateItem.isVisible({ timeout: 30000 }).catch(() => false);
+    if (duplicateVisible) {
+      await pause(page, '메뉴 내 복제 클릭 전 대기', 3000);
+      await duplicateItem.click({ force: true });
+      await pause(page, '복제 클릭 후 대기', 5000);
+      return;
+    }
+  }
+
+  console.log('[WARN] 메뉴 컨테이너 기준 복제 항목 탐색 실패 - 좌표 fallback 시도');
+  const y = adRowBox.y + 80;
+  for (const x of [320, 340, 360]) {
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(2000);
+  }
+
+  const fallbackDuplicate = page.locator('div, span, button').filter({ hasText: /^복제$/ }).first();
+  await fallbackDuplicate.waitFor({ state: 'visible', timeout: 15000 });
+  await fallbackDuplicate.click({ force: true });
+  await pause(page, 'fallback 복제 클릭 후 대기', 5000);
 }
 
 async function setDuplicateCount(page, count = 5) {
