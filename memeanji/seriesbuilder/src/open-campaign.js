@@ -135,6 +135,55 @@ async function findCampaignTarget(page, keyword) {
   return null;
 }
 
+async function closeViewCreatePanelIfOpened(page) {
+  const panelSignals = page.getByText(/보기 만들기|저장|이 보기에 관해 설명해보세요/i).first();
+  const opened = await panelSignals.isVisible({ timeout: 1500 }).catch(() => false);
+  if (!opened) return false;
+
+  console.log('[STEP] 보기 만들기 패널 감지 - 닫기 시도');
+  const closeBtn = page
+    .getByRole('button', { name: /닫기|close|취소/i })
+    .or(page.locator('[aria-label="닫기"], [aria-label="Close"]').first());
+
+  if (await closeBtn.first().isVisible({ timeout: 3000 }).catch(() => false)) {
+    await closeBtn.first().click();
+  } else {
+    await page.keyboard.press('Escape').catch(() => {});
+  }
+
+  await page.waitForTimeout(1000);
+  return true;
+}
+
+async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
+  await closeViewCreatePanelIfOpened(page);
+
+  const modalRoot = page
+    .locator('[role="dialog"]')
+    .filter({ has: page.getByText(/광고 세트|ad set/i) })
+    .first();
+
+  const modalVisible = await modalRoot.isVisible({ timeout: 5000 }).catch(() => false);
+  let nameInput;
+
+  if (modalVisible) {
+    nameInput = modalRoot
+      .getByPlaceholder(/광고 세트 이름 지정/i)
+      .or(modalRoot.getByPlaceholder(/광고 세트 이름|ad set name|이름/i))
+      .or(modalRoot.getByLabel(/광고 세트 이름 지정|광고 세트 이름|ad set name/i));
+  } else {
+    nameInput = page
+      .getByPlaceholder(/광고 세트 이름 지정/i)
+      .or(page.getByPlaceholder(/광고 세트 이름|ad set name|이름/i));
+  }
+
+  await nameInput.first().waitFor({ timeout: 15000 });
+  await nameInput.first().click();
+  await nameInput.first().fill(adsetName);
+
+  await closeViewCreatePanelIfOpened(page);
+}
+
 async function attachMediaFromFolderIfConfigured(page) {
   if (!MEDIA_FOLDER_PATH) {
     console.log('[STEP] MEDIA_FOLDER_PATH 미설정 - 파일 선택 단계 건너뜀');
@@ -211,14 +260,15 @@ async function runFlow(page) {
   }
   await page.screenshot({ path: PATHS.step6, fullPage: true });
 
-  const nameInput = page
-    .getByPlaceholder(/광고 세트 이름|ad set name|이름/i)
-    .or(page.getByLabel(/광고 세트 이름|ad set name|이름/i))
-    .or(page.locator('input[aria-label*="광고 세트"], input[aria-label*="Ad set"], input[placeholder*="이름"], input[placeholder*="name"]').first());
-  await nameInput.first().fill(getAdsetName());
+  await fillAdsetNameInAdsetModalOnly(page, getAdsetName());
   await page.screenshot({ path: PATHS.success, fullPage: true });
 
   await attachMediaFromFolderIfConfigured(page);
+
+  const activePanel = (await page.locator('[role="dialog"]').first().innerText().catch(() => '')).split('\n')[0] || '(unknown)';
+  console.log('[DEBUG] FINAL URL:', page.url());
+  console.log('[DEBUG] FINAL TITLE:', await page.title());
+  console.log('[DEBUG] ACTIVE PANEL:', activePanel);
 
   console.log('[STEP] 최종 검수용 pause 진입 (게시 버튼 수동)');
   await page.pause();
