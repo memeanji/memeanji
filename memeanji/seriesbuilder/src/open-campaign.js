@@ -432,78 +432,52 @@ async function ensureCampaignStructureRoot(page) {
 }
 
 async function openDuplicateMenuViaIcons(page) {
-  console.log('[STEP] 좌측 트리 "새 판매 광고" 행 기준 복제 메뉴 진입');
+  console.log('[STEP] 좌측 트리 "새 판매 광고" 행 점3개 메뉴 진입');
   await ensureCampaignStructureRoot(page);
   await pause(page, '좌측 트리 탐색 전 대기', 5000);
 
   const adRow = page.locator('text=새 판매 광고').first();
   await adRow.waitFor({ state: 'visible', timeout: 30000 });
-  await pause(page, '새 판매 광고 행 확인 후 대기', 5000);
-
   const adRowBox = await adRow.boundingBox();
-  console.log('[DEBUG] 새 판매 광고 row box:', adRowBox);
-  if (!adRowBox) throw new Error('새 판매 광고 행 위치를 찾지 못했습니다.');
 
-  const candidates = await page.locator('div[role="button"], div[role="presentation"], button').elementHandles();
-  let clicked = false;
+  if (!adRowBox) {
+    throw new Error('새 판매 광고 행 위치를 찾지 못했습니다.');
+  }
 
-  for (const el of candidates) {
-    const box = await el.boundingBox();
-    const text = (await el.innerText().catch(() => '')).trim();
-    const className = await el.getAttribute('class');
-    if (!box) continue;
+  const clickY = adRowBox.y + adRowBox.height / 2;
+  let opened = false;
 
-    const sameRow = Math.abs((box.y + box.height / 2) - (adRowBox.y + adRowBox.height / 2)) < 15;
-    const rightSideOfRow = box.x > adRowBox.x + adRowBox.width && box.x < 390;
+  for (const clickX of [325, 315, 335]) {
+    console.log('[STEP] 새 판매 광고 행 점3개 클릭 시도:', { clickX, clickY });
+    await page.mouse.click(clickX, clickY);
+    await page.waitForTimeout(3000);
 
-    console.log('[DEBUG] row action menu candidate:', { text, className, box, sameRow, rightSideOfRow });
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    console.log('[DEBUG] after ad row menu click body text:', bodyText.slice(0, 1000));
 
-    if (sameRow && rightSideOfRow) {
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-      clicked = true;
-      await pause(page, '행 우측 점3개 클릭 후 대기', 5000);
+    if (bodyText.includes('이 광고에 대한 작업') && bodyText.includes('복제')) {
+      console.log('[STEP] 새 판매 광고 작업 메뉴 열림');
+      opened = true;
       break;
     }
   }
 
-  if (!clicked) {
-    // fallback fixed x near requested range
-    await page.mouse.click(332, adRowBox.y + adRowBox.height / 2);
-    await pause(page, '좌표 fallback 점3개 클릭 후 대기', 5000);
+  if (!opened) {
+    await debugDump(page, 'ad-row action menu not opened');
+    throw new Error('새 판매 광고 행의 작업 메뉴를 열지 못했습니다.');
   }
 
   const menuContainer = page.locator('div').filter({ hasText: /이 광고에 대한 작업/ }).first();
-  const menuVisible = await menuContainer.isVisible({ timeout: 30000 }).catch(() => false);
+  await menuContainer.waitFor({ state: 'visible', timeout: 30000 });
 
-  if (menuVisible) {
-    const menuText = await menuContainer.innerText().catch(() => '');
-    console.log('[DEBUG] action menu text:', menuText);
+  const duplicateItem = menuContainer
+    .locator('div, span, button')
+    .filter({ hasText: /^복제$/ })
+    .first();
 
-    const duplicateItem = menuContainer
-      .locator('div, span, button')
-      .filter({ hasText: /^복제$/ })
-      .first();
-
-    const duplicateVisible = await duplicateItem.isVisible({ timeout: 30000 }).catch(() => false);
-    if (duplicateVisible) {
-      await pause(page, '메뉴 내 복제 클릭 전 대기', 3000);
-      await duplicateItem.click({ force: true });
-      await pause(page, '복제 클릭 후 대기', 5000);
-      return;
-    }
-  }
-
-  console.log('[WARN] 메뉴 컨테이너 기준 복제 항목 탐색 실패 - 좌표 fallback 시도');
-  const y = adRowBox.y + 80;
-  for (const x of [320, 340, 360]) {
-    await page.mouse.click(x, y);
-    await page.waitForTimeout(2000);
-  }
-
-  const fallbackDuplicate = page.locator('div, span, button').filter({ hasText: /^복제$/ }).first();
-  await fallbackDuplicate.waitFor({ state: 'visible', timeout: 15000 });
-  await fallbackDuplicate.click({ force: true });
-  await pause(page, 'fallback 복제 클릭 후 대기', 5000);
+  await duplicateItem.waitFor({ state: 'visible', timeout: 30000 });
+  await duplicateItem.click({ force: true });
+  await page.waitForTimeout(5000);
 }
 
 async function setDuplicateCount(page, count = 5) {
