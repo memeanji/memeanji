@@ -35,7 +35,12 @@ cp .env.example .env
      - `CHROME_USER_DATA_DIR=C:\Users\MYUSER\AppData\Local\Google\Chrome\User Data`
      - `CHROME_PROFILE_DIR=Profile 1`
 
-## 4) 로그인 세션 저장
+## 4) 실행 전 주의사항
+
+- Chrome 프로필 파일 충돌 방지를 위해 **Chrome를 완전히 종료한 뒤** 실행하세요.
+- `stealth plugin`, `navigator.webdriver` 수정, OAuth 자동 로그인 입력은 사용하지 않습니다.
+
+## 5) 로그인 세션 저장
 
 ```bash
 npm run login
@@ -47,7 +52,7 @@ npm run login
 3. 사용자가 직접 로그인 상태를 확인
 4. Enter 입력 시 `auth/meta-session.json` 저장
 
-## 5) 캠페인 열기 + 광고세트 이름 자동 입력
+## 6) 캠페인 열기 + 광고세트 이름 자동 입력
 
 ```bash
 npm run open-campaign
@@ -66,6 +71,14 @@ npm run open-campaign
    - 예시: `0513 리타겟 1번 광고세트`
 9. (선택) `MEDIA_FOLDER_PATH`가 설정되어 있으면 해당 폴더의 파일을 자동 선택
 10. `page.pause()`로 멈춤 (최종 검수 후 사용자가 직접 게시)
+
+## 7) 전체 실행 흐름
+
+1. `npm run login`
+2. 브라우저에서 Ads Manager 로그인 상태 확인
+3. 터미널에서 Enter 입력
+4. `auth/meta-session.json` 저장
+5. `npm run open-campaign` 실행
 
 ## 스크린샷
 

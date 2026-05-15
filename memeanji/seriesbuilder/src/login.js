@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import readline from 'node:readline';
 import { chromium } from 'playwright';
 
 const CHROME_USER_DATA_DIR = process.env.CHROME_USER_DATA_DIR;
@@ -19,8 +20,22 @@ const PATHS = {
 };
 
 function validateEnv() {
-  if (!CHROME_USER_DATA_DIR) throw new Error('환경변수 CHROME_USER_DATA_DIR가 필요합니다.');
-  if (!CHROME_PROFILE_DIR) throw new Error('환경변수 CHROME_PROFILE_DIR가 필요합니다.');
+  if (!CHROME_USER_DATA_DIR) throw new Error('CHROME_USER_DATA_DIR is missing in .env');
+  if (!CHROME_PROFILE_DIR) throw new Error('CHROME_PROFILE_DIR is missing in .env');
+}
+
+function waitForEnter() {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    rl.question('', () => {
+      rl.close();
+      resolve();
+    });
+  });
 }
 
 async function ensureDirs() {
@@ -36,34 +51,30 @@ async function main() {
   const context = await chromium.launchPersistentContext(CHROME_USER_DATA_DIR, {
     headless: false,
     channel: 'chrome',
-    args: [`--profile-directory=${CHROME_PROFILE_DIR}`],
     viewport: null,
+    args: [
+      `--profile-directory=${CHROME_PROFILE_DIR}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+    ],
   });
 
   const page = context.pages()[0] ?? (await context.newPage());
 
   try {
     console.log('[LOGIN] Ads Manager 페이지로 이동합니다. (자동 로그인 입력 없음)');
-    await page.goto('https://adsmanager.facebook.com/adsmanager/manage/campaigns', {
+    await page.goto('https://business.facebook.com/adsmanager', {
       waitUntil: 'domcontentloaded',
     });
     await page.screenshot({ path: PATHS.open, fullPage: true });
 
-    console.log('[LOGIN] 일반 Chrome에서 이미 로그인된 세션인지 확인하세요.');
-    console.log('[LOGIN] Ads Manager 화면이 보이면 Enter를 눌러 세션을 저장합니다.');
-    console.log('[LOGIN] 로그인 화면이라면 일반 Chrome에서 먼저 로그인 후 Enter를 누르세요.');
-
-    await new Promise((resolve) => {
-      process.stdin.resume();
-      process.stdin.once('data', () => {
-        process.stdin.pause();
-        resolve();
-      });
-    });
+    console.log('[LOGIN] Meta 로그인 상태 확인 후 Enter를 누르세요.');
+    await waitForEnter();
 
     await page.screenshot({ path: PATHS.ready, fullPage: true });
     await context.storageState({ path: PATHS.session });
-    console.log(`[LOGIN] 세션 저장 완료: ${PATHS.session}`);
+    console.log('[LOGIN] 세션 저장 완료');
+    console.log(`[LOGIN] 저장 경로: ${PATHS.session}`);
   } catch (error) {
     console.error('[LOGIN] 에러 발생:', error);
     await page.screenshot({ path: PATHS.error, fullPage: true });
@@ -74,6 +85,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error);
+  console.error('[FATAL ERROR]', error);
   process.exit(1);
 });

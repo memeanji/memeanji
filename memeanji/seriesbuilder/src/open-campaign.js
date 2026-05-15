@@ -28,11 +28,11 @@ const PATHS = {
 };
 
 function validateEnv() {
-  if (!AD_ACCOUNT_ID) throw new Error('환경변수 AD_ACCOUNT_ID가 필요합니다.');
-  if (!CAMPAIGN_NAME) throw new Error('환경변수 CAMPAIGN_NAME이 필요합니다.');
-  if (!ADSET_INDEX) throw new Error('환경변수 ADSET_INDEX가 필요합니다.');
-  if (!CHROME_USER_DATA_DIR) throw new Error('환경변수 CHROME_USER_DATA_DIR가 필요합니다.');
-  if (!CHROME_PROFILE_DIR) throw new Error('환경변수 CHROME_PROFILE_DIR가 필요합니다.');
+  if (!AD_ACCOUNT_ID) throw new Error('AD_ACCOUNT_ID is missing in .env');
+  if (!CAMPAIGN_NAME) throw new Error('CAMPAIGN_NAME is missing in .env');
+  if (!ADSET_INDEX) throw new Error('ADSET_INDEX is missing in .env');
+  if (!CHROME_USER_DATA_DIR) throw new Error('CHROME_USER_DATA_DIR is missing in .env');
+  if (!CHROME_PROFILE_DIR) throw new Error('CHROME_PROFILE_DIR is missing in .env');
 }
 
 function getTodayMMDD() {
@@ -200,7 +200,11 @@ async function main() {
   const context = await chromium.launchPersistentContext(CHROME_USER_DATA_DIR, {
     headless: false,
     channel: 'chrome',
-    args: [`--profile-directory=${CHROME_PROFILE_DIR}`],
+    args: [
+      `--profile-directory=${CHROME_PROFILE_DIR}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+    ],
     viewport: null,
     storageState: PATHS.session,
   });
@@ -228,6 +232,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error);
+  console.error('[FATAL ERROR]', error);
   process.exit(1);
 });
