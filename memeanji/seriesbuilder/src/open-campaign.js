@@ -11,6 +11,7 @@ const ADSET_START_INDEX = Number(process.env.ADSET_START_INDEX || ADSET_INDEX ||
 const ADSET_COUNT = Number(process.env.ADSET_COUNT || 1);
 const ADSET_DAILY_BUDGET = process.env.ADSET_DAILY_BUDGET;
 const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
+const SCHEDULE_TIME = process.env.SCHEDULE_TIME || '05:00';
 const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 
 const DIRS = {
@@ -47,6 +48,15 @@ function campaignPatternFromInput(value) {
 function getTodayMMDD() {
   const now = new Date();
   return `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+}
+
+
+function parseScheduleTime(value) {
+  const m = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return { hour: 5, minute: 0 };
+  const hour = Math.max(0, Math.min(23, Number(m[1])));
+  const minute = Math.max(0, Math.min(59, Number(m[2])));
+  return { hour, minute };
 }
 
 function getAdsetName(index) {
@@ -338,28 +348,64 @@ async function updateDateAndTimeBeforeContinue(page) {
     console.log('[DEBUG] 날짜 파싱 실패, 기존 값 유지:', currentDateText);
   }
 
-  const timeInputs = await page.locator('input').elementHandles();
-  for (const input of timeInputs) {
-    const value = await input.getAttribute('value');
-    const placeholder = await input.getAttribute('placeholder');
-    const ariaLabel = await input.getAttribute('aria-label');
+  const { hour, minute } = parseScheduleTime(SCHEDULE_TIME);
+  const targetTimeText = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 
-    console.log('[DEBUG] time input candidate:', { value, placeholder, ariaLabel });
+  const hourSpin = page.locator('input[role="spinbutton"][aria-label*="시간"]').first();
+  const minuteSpin = page.locator('input[role="spinbutton"][aria-label*="분"]').first();
 
-    if (
-      value?.includes(':') ||
-      placeholder?.includes('시간') ||
-      ariaLabel?.includes('시간')
-    ) {
-      await input.click();
-      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-      await page.keyboard.press('Backspace');
-      await page.keyboard.type('05:00', { delay: 50 });
-      await page.waitForTimeout(1500);
-      await pause(page, '시간 변경 반영 대기', 2000);
-      break;
+  const hourVisible = await hourSpin.isVisible({ timeout: 5000 }).catch(() => false);
+  if (hourVisible) {
+    await hourSpin.click();
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.type(String(hour), { delay: 80 });
+    await page.waitForTimeout(700);
+
+    await hourSpin.evaluate((el, hourVal) => {
+      el.setAttribute('aria-valuenow', String(hourVal));
+      el.setAttribute('aria-valuemin', '0');
+      if ('value' in el) el.value = String(hourVal);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, hour);
+  }
+
+  const minuteVisible = await minuteSpin.isVisible({ timeout: 3000 }).catch(() => false);
+  if (minuteVisible) {
+    await minuteSpin.click();
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.type(String(minute).padStart(2, '0'), { delay: 80 });
+    await page.waitForTimeout(700);
+    await minuteSpin.evaluate((el, minuteVal) => {
+      el.setAttribute('aria-valuenow', String(minuteVal));
+      el.setAttribute('aria-valuemin', '0');
+      if ('value' in el) el.value = String(minuteVal).padStart(2, '0');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, minute);
+  }
+
+  if (!hourVisible) {
+    // fallback: generic time-like input
+    const timeInputs = await page.locator('input').elementHandles();
+    for (const input of timeInputs) {
+      const value = await input.getAttribute('value');
+      const placeholder = await input.getAttribute('placeholder');
+      const ariaLabel = await input.getAttribute('aria-label');
+
+      console.log('[DEBUG] time input candidate:', { value, placeholder, ariaLabel });
+      if (value?.includes(':') || placeholder?.includes('시간') || ariaLabel?.includes('시간')) {
+        await input.click();
+        await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+        await page.keyboard.press('Backspace');
+        await page.keyboard.type(targetTimeText, { delay: 50 });
+        await page.waitForTimeout(1500);
+        break;
+      }
     }
   }
+
+  console.log('[DEBUG] schedule target time applied:', targetTimeText);
 
   return true;
 }

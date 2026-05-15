@@ -10,6 +10,7 @@
 - `ADSET_COUNT` (기본: 1)
 - `ADSET_DAILY_BUDGET` (선택)
 - `CDP_URL` (기본: `http://127.0.0.1:9222`)
+- `SCHEDULE_TIME` (기본: `05:00`)
 - `MEDIA_FOLDER_PATH` (선택)
 
 ## 광고 세트명 규칙
