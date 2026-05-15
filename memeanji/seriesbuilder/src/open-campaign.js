@@ -412,8 +412,28 @@ async function updateDateAndTimeBeforeContinue(page) {
 
 
 
+
+async function ensureCampaignStructureRoot(page) {
+  console.log('[STEP] campaign_structure_tree_root 탐색');
+  const root = page.locator('#campaign_structure_tree_root').first();
+
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const visible = await root.isVisible({ timeout: 3000 }).catch(() => false);
+    console.log(`[DEBUG] campaign_structure_tree_root visible attempt ${attempt}/8:`, visible);
+    if (visible) {
+      await pause(page, 'campaign_structure_tree_root 확인 후 안정화 대기', 3000);
+      return true;
+    }
+    await page.waitForTimeout(3000);
+  }
+
+  await debugDump(page, 'campaign_structure_tree_root not found');
+  throw new Error('id="campaign_structure_tree_root"를 찾지 못했습니다.');
+}
+
 async function openDuplicateMenuViaIcons(page) {
   console.log('[STEP] 복제 메뉴 사전 진입: 점세개 -> 복제');
+  await ensureCampaignStructureRoot(page);
 
   await pause(page, '점세개(더보기) 탐색 전 대기', 3000);
 
