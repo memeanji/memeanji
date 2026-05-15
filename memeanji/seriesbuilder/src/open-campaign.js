@@ -432,68 +432,66 @@ async function ensureCampaignStructureRoot(page) {
 }
 
 async function openDuplicateMenuViaIcons(page) {
-  console.log('[STEP] 복제 메뉴 사전 진입: 점세개 -> 복제');
+  console.log('[STEP] 복제 메뉴 사전 진입: 기본/더보기 토글 -> 이 광고에 대한 작업 -> 복제');
+
   await ensureCampaignStructureRoot(page);
+  await pause(page, '더보기 토글 탐색 전 대기', 3000);
 
-  await pause(page, '점세개(더보기) 탐색 전 대기', 3000);
+  const toggleButton = page
+    .locator('div[role="button"][aria-busy="false"]')
+    .filter({ has: page.locator('.xtwfq29') })
+    .first();
 
-  const menuRoot = page.locator('.x3nfvp2.x120ccyz.x1heor9g.x2lah0s.x1c4vz4f').first();
-  const menuIcon = page.locator('.xtwfq29').first();
+  let toggled = false;
+  for (let attempt = 1; attempt <= 8 && !toggled; attempt += 1) {
+    const visible = await toggleButton.isVisible({ timeout: 3000 }).catch(() => false);
+    console.log(`[DEBUG] toggle button visible attempt ${attempt}/8:`, visible);
 
-  let menuClicked = false;
-  for (let attempt = 1; attempt <= 6 && !menuClicked; attempt += 1) {
-    console.log(`[WAIT] 더보기 버튼 탐색 ${attempt}/6`);
-
-    const rootVisible = await menuRoot.isVisible({ timeout: 3000 }).catch(() => false);
-    const iconVisible = await menuIcon.isVisible({ timeout: 3000 }).catch(() => false);
-
-    if (rootVisible || iconVisible) {
-      const target = iconVisible ? menuIcon : menuRoot;
-      await target.click({ force: true }).catch(async () => {
-        const box = await target.boundingBox();
+    if (visible) {
+      await toggleButton.click({ force: true }).catch(async () => {
+        const box = await toggleButton.boundingBox();
         if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       });
-      menuClicked = true;
+
+      await toggleButton.evaluate((el) => {
+        el.setAttribute('aria-busy', 'true');
+      }).catch(() => {});
+
+      toggled = true;
       break;
     }
 
     await page.waitForTimeout(3000);
   }
 
-  if (!menuClicked) {
-    throw new Error('점세개(더보기) 버튼을 찾지 못했습니다.');
+  if (!toggled) {
+    throw new Error('기본/더보기 토글 버튼(aria-busy=false + .xtwfq29)을 찾지 못했습니다.');
   }
 
-  await pause(page, '더보기 열림 후 메뉴 안정화 대기', 4000);
+  await pause(page, '토글 클릭 후 메뉴 로딩 대기', 4000);
 
-  const labelledMenu = page.locator('[aria-labelledby="js_13o"]').first();
-  const duplicateButton = page.locator('.x1mcwxda').first();
-
-  let duplicateClicked = false;
-  for (let attempt = 1; attempt <= 6 && !duplicateClicked; attempt += 1) {
-    console.log(`[WAIT] 복제 버튼 탐색 ${attempt}/6`);
-
-    const labelledVisible = await labelledMenu.isVisible({ timeout: 3000 }).catch(() => false);
-    const duplicateVisible = await duplicateButton.isVisible({ timeout: 3000 }).catch(() => false);
-
-    if (labelledVisible || duplicateVisible) {
-      const target = duplicateVisible ? duplicateButton : labelledMenu;
-      await target.click({ force: true }).catch(async () => {
-        const box = await target.boundingBox();
-        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-      });
-      duplicateClicked = true;
-      break;
-    }
-
-    await page.waitForTimeout(3000);
+  const workHeading = page.getByRole('heading', { name: '이 광고에 대한 작업' }).first();
+  const headingVisible = await workHeading.isVisible({ timeout: 30000 }).catch(() => false);
+  if (!headingVisible) {
+    await debugDump(page, 'work heading not found');
+    throw new Error('"이 광고에 대한 작업" 헤딩을 찾지 못했습니다.');
   }
 
-  if (!duplicateClicked) {
-    throw new Error('복제 버튼(x1mcwxda/aria-labelledby=js_13o)을 찾지 못했습니다.');
+  await pause(page, '복제 버튼 탐색 전 대기', 3000);
+
+  const duplicateButton = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
+  const duplicateVisible = await duplicateButton.isVisible({ timeout: 30000 }).catch(() => false);
+  if (!duplicateVisible) {
+    await debugDump(page, 'duplicate button x1mcwxda not found');
+    throw new Error('div.x1mcwxda 텍스트 "복제" 버튼을 찾지 못했습니다.');
   }
 
-  await pause(page, '복제 메뉴 클릭 후 대기', 5000);
+  await duplicateButton.click({ force: true }).catch(async () => {
+    const box = await duplicateButton.boundingBox();
+    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  });
+
+  await pause(page, '복제 버튼 클릭 후 대기', 5000);
 }
 
 async function setDuplicateCount(page, count = 5) {
