@@ -41,23 +41,26 @@ function campaignPatternFromInput(value) {
 
 async function trySearchBox(page, keyword) {
   const searchInput = page
-    .getByPlaceholder(/검색|search|필터|filter/i)
-    .or(page.getByRole('searchbox'))
-    .or(page.getByLabel(/검색|search|필터|filter/i));
+    .locator('input[type="text"], input[type="search"], textarea')
+    .filter({ hasNot: page.locator('[type="checkbox"], [role="switch"]') })
+    .filter({ hasNot: page.locator('[aria-label*="빠른 보기" i], [aria-label*="저장" i]') })
+    .first();
 
-  if (await searchInput.first().isVisible({ timeout: 3000 }).catch(() => false)) {
-    console.log('[STEP] 캠페인 검색창 감지 - 검색어 입력 시도');
-    await searchInput.first().click();
-    await searchInput.first().fill('');
-    await searchInput.first().fill(keyword);
-    await page.keyboard.press('Enter').catch(() => {});
-    await page.waitForTimeout(3000);
-    return true;
+  const visible = await searchInput.isVisible({ timeout: 3000 }).catch(() => false);
+  if (!visible) {
+    console.log('[STEP] 캠페인 검색창 미감지 - 목록에서 직접 탐색');
+    return false;
   }
 
-  console.log('[STEP] 캠페인 검색창 미감지 - 목록에서 직접 탐색');
-  return false;
+  console.log('[STEP] 캠페인 검색창 감지 - 검색어 입력 시도');
+  await searchInput.click();
+  await searchInput.fill('');
+  await searchInput.fill(keyword);
+  await page.keyboard.press('Enter').catch(() => {});
+  await page.waitForTimeout(3000);
+  return true;
 }
+
 
 async function logCampaignCandidates(page, limit = 10) {
   const rows = page.getByRole('row');
@@ -184,6 +187,30 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   await closeViewCreatePanelIfOpened(page);
 }
 
+
+async function ensureQuickViewSaveSwitchEnabled(page) {
+  const switchLocator = page
+    .locator('input[type="checkbox"][role="switch"][aria-label*="빠른 보기" i], input[type="checkbox"][role="switch"][aria-label*="필터" i]')
+    .first();
+
+  const exists = await switchLocator.isVisible({ timeout: 2000 }).catch(() => false);
+  if (!exists) {
+    console.log('[STEP] 빠른 보기 저장 스위치 미감지 - 건너뜀');
+    return;
+  }
+
+  const isChecked = await switchLocator.isChecked().catch(() => false);
+  if (!isChecked) {
+    console.log('[STEP] 빠른 보기 저장 스위치 OFF -> ON 전환 시도');
+    await switchLocator.check({ force: true }).catch(async () => {
+      await switchLocator.click({ force: true });
+    });
+  }
+
+  const finalChecked = await switchLocator.isChecked().catch(() => false);
+  console.log(`[DEBUG] 빠른 보기 저장 스위치 상태: ${finalChecked ? 'true' : 'false'}`);
+}
+
 async function attachMediaFromFolderIfConfigured(page) {
   if (!MEDIA_FOLDER_PATH) {
     console.log('[STEP] MEDIA_FOLDER_PATH 미설정 - 파일 선택 단계 건너뜀');
@@ -261,6 +288,7 @@ async function runFlow(page) {
   await page.screenshot({ path: PATHS.step6, fullPage: true });
 
   await fillAdsetNameInAdsetModalOnly(page, getAdsetName());
+  await ensureQuickViewSaveSwitchEnabled(page);
   await page.screenshot({ path: PATHS.success, fullPage: true });
 
   await attachMediaFromFolderIfConfigured(page);
