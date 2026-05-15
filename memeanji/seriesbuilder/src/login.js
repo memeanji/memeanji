@@ -4,8 +4,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { chromium } from 'playwright';
 
-const CHROME_USER_DATA_DIR = process.env.CHROME_USER_DATA_DIR;
-const CHROME_PROFILE_DIR = process.env.CHROME_PROFILE_DIR;
+const PLAYWRIGHT_USER_DATA_DIR = process.env.PLAYWRIGHT_USER_DATA_DIR;
 
 const DIRS = {
   auth: path.resolve('auth'),
@@ -20,8 +19,7 @@ const PATHS = {
 };
 
 function validateEnv() {
-  if (!CHROME_USER_DATA_DIR) throw new Error('CHROME_USER_DATA_DIR is missing in .env');
-  if (!CHROME_PROFILE_DIR) throw new Error('CHROME_PROFILE_DIR is missing in .env');
+  if (!PLAYWRIGHT_USER_DATA_DIR) throw new Error('PLAYWRIGHT_USER_DATA_DIR is missing in .env');
 }
 
 function waitForEnter() {
@@ -48,12 +46,11 @@ async function main() {
   await ensureDirs();
 
   console.log('[LOGIN] 기존 Chrome 프로필로 브라우저를 엽니다.');
-  const context = await chromium.launchPersistentContext(CHROME_USER_DATA_DIR, {
+  const context = await chromium.launchPersistentContext(PLAYWRIGHT_USER_DATA_DIR, {
     headless: false,
     channel: 'chrome',
     viewport: null,
     args: [
-      `--profile-directory=${CHROME_PROFILE_DIR}`,
       '--no-first-run',
       '--no-default-browser-check',
     ],

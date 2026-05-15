@@ -6,8 +6,7 @@ import { chromium } from 'playwright';
 const AD_ACCOUNT_ID = process.env.AD_ACCOUNT_ID;
 const CAMPAIGN_NAME = process.env.CAMPAIGN_NAME;
 const ADSET_INDEX = process.env.ADSET_INDEX;
-const CHROME_USER_DATA_DIR = process.env.CHROME_USER_DATA_DIR;
-const CHROME_PROFILE_DIR = process.env.CHROME_PROFILE_DIR;
+const PLAYWRIGHT_USER_DATA_DIR = process.env.PLAYWRIGHT_USER_DATA_DIR;
 const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
 
 const DIRS = {
@@ -31,8 +30,7 @@ function validateEnv() {
   if (!AD_ACCOUNT_ID) throw new Error('AD_ACCOUNT_ID is missing in .env');
   if (!CAMPAIGN_NAME) throw new Error('CAMPAIGN_NAME is missing in .env');
   if (!ADSET_INDEX) throw new Error('ADSET_INDEX is missing in .env');
-  if (!CHROME_USER_DATA_DIR) throw new Error('CHROME_USER_DATA_DIR is missing in .env');
-  if (!CHROME_PROFILE_DIR) throw new Error('CHROME_PROFILE_DIR is missing in .env');
+  if (!PLAYWRIGHT_USER_DATA_DIR) throw new Error('PLAYWRIGHT_USER_DATA_DIR is missing in .env');
 }
 
 function getTodayMMDD() {
@@ -197,11 +195,10 @@ async function main() {
   await ensureSessionExists();
 
   console.log('[OPEN] launchPersistentContext 시작 (기존 Chrome 프로필 재사용)');
-  const context = await chromium.launchPersistentContext(CHROME_USER_DATA_DIR, {
+  const context = await chromium.launchPersistentContext(PLAYWRIGHT_USER_DATA_DIR, {
     headless: false,
     channel: 'chrome',
     args: [
-      `--profile-directory=${CHROME_PROFILE_DIR}`,
       '--no-first-run',
       '--no-default-browser-check',
     ],
