@@ -157,7 +157,9 @@ async function clickLeftCreateButtonOnly(page) {
 async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   await closeViewCreatePanelIfOpened(page);
 
-  const adsetNameInput = page.locator('input[placeholder="광고 세트 이름 지정"]').first();
+  const adsetNameInput = page
+    .locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb, input[type="text"][value]')
+    .first();
   const visible = await adsetNameInput.isVisible({ timeout: 30000 }).catch(() => false);
 
   if (!visible) {
@@ -165,11 +167,19 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
     console.log('[DEBUG] adset name input timeout URL:', page.url());
     console.log('[DEBUG] adset name input timeout TITLE:', await page.title());
     console.log('[DEBUG] adset name input modal text:', modalText);
-    throw new Error('placeholder="광고 세트 이름 지정" input을 찾지 못했습니다.');
+    throw new Error('광고 세트 이름 input을 찾지 못했습니다.');
   }
 
   await adsetNameInput.click();
-  await adsetNameInput.fill(adsetName);
+  await page.keyboard.press('Control+A');
+  await page.keyboard.press('Backspace');
+  await adsetNameInput.type(adsetName, { delay: 30 });
+
+  const currentValue = await adsetNameInput.inputValue().catch(() => '');
+  console.log('[DEBUG] adset name input value:', currentValue);
+  if (currentValue.trim() !== adsetName) {
+    throw new Error(`광고 세트 이름 입력 검증 실패: expected="${adsetName}", actual="${currentValue}"`);
+  }
 
   const continueButton = page
     .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g')
