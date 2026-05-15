@@ -3,6 +3,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
+const CHROME_USER_DATA_DIR = process.env.CHROME_USER_DATA_DIR;
+const CHROME_PROFILE_DIR = process.env.CHROME_PROFILE_DIR;
+
 const DIRS = {
   auth: path.resolve('auth'),
   screenshots: path.resolve('screenshots'),
@@ -15,24 +18,42 @@ const PATHS = {
   error: path.join(DIRS.screenshots, 'error.png'),
 };
 
+function validateEnv() {
+  if (!CHROME_USER_DATA_DIR) {
+    throw new Error('환경변수 CHROME_USER_DATA_DIR가 필요합니다.');
+  }
+
+  if (!CHROME_PROFILE_DIR) {
+    throw new Error('환경변수 CHROME_PROFILE_DIR가 필요합니다.');
+  }
+}
+
 async function ensureDirs() {
   await fs.mkdir(DIRS.auth, { recursive: true });
   await fs.mkdir(DIRS.screenshots, { recursive: true });
 }
 
 async function main() {
+  validateEnv();
   await ensureDirs();
 
-  const browser = await chromium.launch({ headless: false });
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  console.log('[LOGIN] launchPersistentContext 시작');
+  const context = await chromium.launchPersistentContext(CHROME_USER_DATA_DIR, {
+    headless: false,
+    channel: 'chrome',
+    args: [`--profile-directory=${CHROME_PROFILE_DIR}`],
+    viewport: null,
+  });
+
+  const page = context.pages()[0] ?? (await context.newPage());
 
   try {
+    console.log('[LOGIN] Facebook 접속');
     await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded' });
     await page.screenshot({ path: PATHS.login, fullPage: true });
 
-    console.log('\n[LOGIN] 브라우저에서 Meta(Facebook) 로그인을 완료하세요.');
-    console.log('[LOGIN] 로그인 완료 후 Ads Manager 메인 화면(캠페인 목록)이 보이면 Enter를 누르세요.\n');
+    console.log('[LOGIN] 브라우저에서 정상 로그인 상태를 확인하세요.');
+    console.log('[LOGIN] Ads Manager 캠페인 목록이 보이면 Enter를 눌러 세션 저장을 진행합니다.');
 
     await new Promise((resolve) => {
       process.stdin.resume();
@@ -42,13 +63,12 @@ async function main() {
       });
     });
 
+    console.log('[LOGIN] Ads Manager 캠페인 화면 확인');
     await page.goto('https://adsmanager.facebook.com/adsmanager/manage/campaigns', {
       waitUntil: 'domcontentloaded',
     });
 
-    await page.getByRole('button', { name: /campaigns|캠페인/i }).first().waitFor({
-      timeout: 60000,
-    });
+    await page.getByRole('button', { name: /campaigns|캠페인/i }).first().waitFor({ timeout: 60000 });
 
     await page.screenshot({ path: PATHS.loggedIn, fullPage: true });
     await context.storageState({ path: PATHS.session });
@@ -59,7 +79,7 @@ async function main() {
     await page.screenshot({ path: PATHS.error, fullPage: true });
     throw error;
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 
