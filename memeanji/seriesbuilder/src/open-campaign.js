@@ -142,46 +142,67 @@ async function findCampaignTarget(page, keyword) {
   return null;
 }
 
-async function closeViewCreatePanelIfOpened(page) {
-  const panelSignals = page.getByText(/보기 만들기|저장|이 보기에 관해 설명해보세요/i).first();
-  const opened = await panelSignals.isVisible({ timeout: 1500 }).catch(() => false);
-  if (!opened) return false;
-
-  console.log('[STEP] 보기 만들기 패널 감지 - 닫기 시도');
-  const closeBtn = page
-    .getByRole('button', { name: /닫기|close|취소/i })
-    .or(page.locator('[aria-label="닫기"], [aria-label="Close"]').first());
-
-  if (await closeBtn.first().isVisible({ timeout: 3000 }).catch(() => false)) {
-    await closeBtn.first().click();
-  } else {
-    await page.keyboard.press('Escape').catch(() => {});
-  }
-
-  await pause(page, '보기 만들기 패널 닫기 후 대기', 2500);
-  return true;
-}
-
-async function clickLeftCreateButtonOnly(page) {
-  const createCandidates = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g');
+async function clickRealCreateButton(page) {
+  const createCandidates = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli');
   const count = await createCandidates.count();
 
   for (let i = 0; i < count; i += 1) {
     const candidate = createCandidates.nth(i);
     const text = (await candidate.innerText().catch(() => '')).trim();
-    console.log('[DEBUG] create button text:', text);
-    if (!text || text.includes('보기 만들기')) continue;
-    if (text === '만들기') {
+    const box = await candidate.boundingBox().catch(() => null);
+    console.log('[DEBUG] create button candidate:', { index: i, text, box });
+
+    if (text !== '만들기') continue;
+    if (text.includes('보기 만들기')) continue;
+    if (!box) continue;
+
+    if (box.x < 300 && box.y > 150 && box.y < 300) {
       await candidate.click();
       return;
     }
   }
-  throw new Error('왼쪽 "+ 만들기" 버튼을 찾지 못했습니다.');
+
+  throw new Error('좌측 상단 실제 +만들기 버튼을 찾지 못했습니다.');
+}
+
+async function isAdsetCreateOpen(page) {
+  const byPlaceholder = await page.locator('input[placeholder="광고 세트 이름 지정"]').first().isVisible({ timeout: 1500 }).catch(() => false);
+  if (byPlaceholder) return true;
+
+  const textInputs = await page.locator('input[type="text"]').elementHandles();
+  for (const input of textInputs) {
+    const value = await input.getAttribute('value');
+    if (value?.includes('리타겟') || value?.includes('광고세트')) return true;
+  }
+
+  const hasContinue = await page.getByText(/^계속$/).first().isVisible({ timeout: 1200 }).catch(() => false);
+  const hasCancel = await page.getByText(/^취소$/).first().isVisible({ timeout: 1200 }).catch(() => false);
+  return hasContinue && hasCancel;
+}
+
+async function ensureAdsetCreateOpen(page) {
+  const isOpen = await isAdsetCreateOpen(page);
+  if (isOpen) {
+    console.log('[STEP] 광고 세트 생성 화면 확인됨');
+    return true;
+  }
+
+  console.log('[WARN] 광고 세트 생성 화면이 아님 - +만들기 재진입 시도');
+  await clickRealCreateButton(page);
+  await pause(page, '광고 세트 생성 재진입 대기', 3000);
+
+  const reopened = await isAdsetCreateOpen(page);
+  if (!reopened) {
+    await page.screenshot({ path: path.join(DIRS.screenshots, 'adset-create-reopen-failed.png'), fullPage: true });
+    await debugDump(page, 'adset create reopen failed');
+    throw new Error('광고 세트 생성 화면 재진입 실패');
+  }
+  return true;
 }
 
 async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
-  await closeViewCreatePanelIfOpened(page);
-  await pause(page, '광고 세트명 입력 전 대기', 2500);
+  await ensureAdsetCreateOpen(page);
+  await pause(page, '광고 세트명 입력 전 대기', 2000);
 
   const broadLocator = page.locator(
     'input[placeholder="광고 세트 이름 지정"], input._58al._aghb[type="text"], input[type="text"][value*="리타겟"], input[type="text"][value*="광고세트"], input[type="text"][value*="광고 세트 이름 지정"], input[data-auto-logging-id]'
@@ -275,7 +296,7 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   }
 
   const nextButton = nextCandidates
-    .filter({ hasText: /다음|계속|만들기|완료/i })
+    .filter({ hasText: /^계속$/ })
     .first();
 
   const visible = await nextButton.isVisible({ timeout: 15000 }).catch(() => false);
@@ -285,15 +306,18 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   }
 
   await page.waitForTimeout(1000);
-  await nextButton.click({ timeout: 10000 });
+  await nextButton.click({ timeout: 10000 }).catch(async () => {
+    await nextButton.click({ force: true });
+  }).catch(async () => {
+    const box = await nextButton.boundingBox();
+    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  });
   await page.waitForTimeout(3000);
   await page.screenshot({ path: path.join(DIRS.screenshots, '08-adset-name-and-continue.png'), fullPage: true });
 
-  await closeViewCreatePanelIfOpened(page);
 }
 
 async function fillAdsetBudgetInModalOnly(page, budgetValue) {
-  await closeViewCreatePanelIfOpened(page);
   const modalRoot = page.locator('[role="dialog"]').filter({ has: page.getByText(/광고 세트|ad set/i) }).first();
   const modalVisible = await modalRoot.isVisible({ timeout: 3000 }).catch(() => false);
 
@@ -312,20 +336,11 @@ async function fillAdsetBudgetInModalOnly(page, budgetValue) {
     console.log('[STEP] 예산 입력창 미감지 - 건너뜀');
   }
 
-  await closeViewCreatePanelIfOpened(page);
 }
 
 async function enterAdsetFlow(page) {
-  const adsetNameInput = page
-    .locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb')
-    .first();
-
-  try {
-    await adsetNameInput.waitFor({ state: 'visible', timeout: 180000 });
-  } catch {
-    await debugDump(page, 'enterAdsetFlow timeout');
-    throw new Error('광고 세트 생성 모달(광고 세트 이름 지정 input)을 찾지 못했습니다.');
-  }
+  await ensureAdsetCreateOpen(page);
+  await page.locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb').first().waitFor({ state: 'visible', timeout: 180000 });
 }
 
 
@@ -373,7 +388,7 @@ async function runFlow(page) {
     const adsetName = getAdsetName(index);
     console.log(`[STEP] ${n + 1}/${ADSET_COUNT} 광고 세트 생성 시작: ${adsetName}`);
 
-    await clickLeftCreateButtonOnly(page);
+    await clickRealCreateButton(page);
     await pause(page, '만들기 버튼 클릭 후 대기', 3000);
     await page.screenshot({ path: PATHS.step5, fullPage: true });
     await enterAdsetFlow(page);
