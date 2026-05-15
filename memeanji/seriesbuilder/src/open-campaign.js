@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 const AD_ACCOUNT_ID = process.env.AD_ACCOUNT_ID;
 const CAMPAIGN_NAME = process.env.CAMPAIGN_NAME;
 const ADSET_INDEX = process.env.ADSET_INDEX;
-const ADSET_BASE_NAME = process.env.ADSET_BASE_NAME || '리타겟';
+const ADSET_BASE_NAME = '리타겟';
 const ADSET_START_INDEX = Number(process.env.ADSET_START_INDEX || ADSET_INDEX || 1);
 const ADSET_COUNT = Number(process.env.ADSET_COUNT || 1);
 const ADSET_DAILY_BUDGET = process.env.ADSET_DAILY_BUDGET;
@@ -156,17 +156,38 @@ async function clickLeftCreateButtonOnly(page) {
 
 async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   await closeViewCreatePanelIfOpened(page);
-  const modalRoot = page.locator('[role="dialog"]').filter({ has: page.getByText(/광고 세트|ad set/i) }).first();
-  const modalVisible = await modalRoot.isVisible({ timeout: 5000 }).catch(() => false);
 
-  const nameInput = modalVisible
-    ? modalRoot.getByPlaceholder(/광고 세트 이름 지정/i)
-      .or(modalRoot.getByPlaceholder(/광고 세트 이름|ad set name|이름/i))
-      .or(modalRoot.getByLabel(/광고 세트 이름 지정|광고 세트 이름|ad set name/i))
-    : page.getByPlaceholder(/광고 세트 이름 지정/i).or(page.getByPlaceholder(/광고 세트 이름|ad set name|이름/i));
+  const adsetNameInput = page.locator('input[placeholder="광고 세트 이름 지정"]').first();
+  const visible = await adsetNameInput.isVisible({ timeout: 30000 }).catch(() => false);
 
-  await nameInput.first().waitFor({ timeout: 15000 });
-  await nameInput.first().fill(adsetName);
+  if (!visible) {
+    const modalText = (await page.locator('[role="dialog"]').first().innerText().catch(() => '')).slice(0, 500);
+    console.log('[DEBUG] adset name input timeout URL:', page.url());
+    console.log('[DEBUG] adset name input timeout TITLE:', await page.title());
+    console.log('[DEBUG] adset name input modal text:', modalText);
+    throw new Error('placeholder="광고 세트 이름 지정" input을 찾지 못했습니다.');
+  }
+
+  await adsetNameInput.click();
+  await adsetNameInput.fill(adsetName);
+
+  const continueButton = page
+    .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g')
+    .filter({ hasText: /^계속$/ })
+    .first();
+
+  const continueVisible = await continueButton.isVisible({ timeout: 30000 }).catch(() => false);
+  if (!continueVisible) {
+    const modalText = (await page.locator('[role="dialog"]').first().innerText().catch(() => '')).slice(0, 500);
+    console.log('[DEBUG] continue button timeout URL:', page.url());
+    console.log('[DEBUG] continue button timeout TITLE:', await page.title());
+    console.log('[DEBUG] continue button modal text:', modalText);
+    throw new Error('textContent가 정확히 "계속"인 버튼을 찾지 못했습니다.');
+  }
+
+  await continueButton.click();
+  await page.screenshot({ path: path.join(DIRS.screenshots, '08-adset-name-and-continue.png'), fullPage: true });
+
   await closeViewCreatePanelIfOpened(page);
 }
 
@@ -194,12 +215,16 @@ async function fillAdsetBudgetInModalOnly(page, budgetValue) {
 }
 
 async function enterAdsetFlow(page) {
-  const adsetOption = page
-    .getByRole('radio', { name: /광고 세트|ad set/i })
-    .or(page.getByRole('button', { name: /광고 세트|ad set/i }))
-    .or(page.getByText(/광고 세트|ad set/i));
-  if (await adsetOption.first().isVisible({ timeout: 5000 }).catch(() => false)) {
-    await adsetOption.first().click();
+  // 광고 세트 라디오를 강제 탐색하지 않고, 실제 이름 input 등장 여부로 판단
+  const adsetNameInput = page.locator('input[placeholder="광고 세트 이름 지정"]').first();
+  const ready = await adsetNameInput.isVisible({ timeout: 30000 }).catch(() => false);
+
+  if (!ready) {
+    const modalText = (await page.locator('[role="dialog"]').first().innerText().catch(() => '')).slice(0, 500);
+    console.log('[DEBUG] enterAdsetFlow timeout URL:', page.url());
+    console.log('[DEBUG] enterAdsetFlow timeout TITLE:', await page.title());
+    console.log('[DEBUG] enterAdsetFlow modal text:', modalText);
+    throw new Error('광고 세트 생성 모달(광고 세트 이름 지정 input)을 찾지 못했습니다.');
   }
 }
 
