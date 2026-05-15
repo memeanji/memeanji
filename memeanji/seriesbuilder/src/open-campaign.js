@@ -184,37 +184,52 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   await pause(page, '광고 세트명 입력 전 대기', 2500);
 
   const broadLocator = page.locator(
-    'input[placeholder="광고 세트 이름 지정"], input._58al._aghb[type="text"], input[type="text"][value*="리타겟"], input[type="text"][value*="광고세트"], input[data-auto-logging-id]'
+    'input[placeholder="광고 세트 이름 지정"], input._58al._aghb[type="text"], input[type="text"][value*="리타겟"], input[type="text"][value*="광고세트"], input[type="text"][value*="광고 세트 이름 지정"], input[data-auto-logging-id]'
   );
 
   const broadCount = await broadLocator.count();
   console.log('[DEBUG] adset input broad candidate count:', broadCount);
 
   let targetInputHandle = null;
-  const inputs = await page.locator('input[type="text"]').elementHandles();
+  const deadline = Date.now() + 180000; // 최대 3분
 
-  for (const input of inputs) {
-    const value = await input.getAttribute('value');
-    const placeholder = await input.getAttribute('placeholder');
-    const className = await input.getAttribute('class');
-
-    console.log('[DEBUG] input candidate:', { value, placeholder, className });
-
-    if (
-      placeholder === '광고 세트 이름 지정' ||
-      value?.includes('리타겟') ||
-      value?.includes('광고세트') ||
-      className?.includes('_58al')
-    ) {
-      targetInputHandle = input;
+  while (Date.now() < deadline && !targetInputHandle) {
+    const directLocator = page.locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb[type="text"]').first();
+    if (await directLocator.isVisible({ timeout: 2000 }).catch(() => false)) {
+      targetInputHandle = await directLocator.elementHandle();
       break;
+    }
+
+    const inputs = await page.locator('input[type="text"]').elementHandles();
+    for (const input of inputs) {
+      const value = await input.getAttribute('value');
+      const placeholder = await input.getAttribute('placeholder');
+      const className = await input.getAttribute('class');
+
+      console.log('[DEBUG] input candidate:', { value, placeholder, className });
+
+      if (
+        placeholder === '광고 세트 이름 지정' ||
+        value?.includes('리타겟') ||
+        value?.includes('광고세트') ||
+        value?.includes('광고 세트 이름 지정') ||
+        className?.includes('_58al')
+      ) {
+        targetInputHandle = input;
+        break;
+      }
+    }
+
+    if (!targetInputHandle) {
+      console.log('[WAIT] 광고 세트 이름 input 탐색 중... (2s 재시도)');
+      await page.waitForTimeout(2000);
     }
   }
 
   if (!targetInputHandle) {
-    await debugDump(page, 'adsetNameInput not found');
+    await debugDump(page, 'adsetNameInput not found after 3min');
     await page.screenshot({ path: path.join(DIRS.screenshots, 'adset-name-input-not-found.png'), fullPage: true });
-    throw new Error('광고 세트 이름 input을 찾지 못했습니다.');
+    throw new Error('광고 세트 이름 input을 3분 내에 찾지 못했습니다.');
   }
 
   await targetInputHandle.asElement().click();
@@ -229,7 +244,7 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   let actualValue = await targetInputHandle.evaluate((el) => el.value || '');
   console.log('[DEBUG] actual adset input value:', actualValue);
 
-  if (!actualValue.includes(adsetName)) {
+  if (!actualValue.trim().includes(adsetName)) {
     console.log('[DEBUG] keyboard.type 미반영 - DOM value fallback 적용');
     await targetInputHandle.evaluate((el, value) => {
       el.focus();
@@ -243,7 +258,7 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
     console.log('[DEBUG] actual adset input value after fallback:', actualValue);
   }
 
-  if (!actualValue.includes(adsetName)) {
+  if (!actualValue.trim().includes(adsetName)) {
     await debugDump(page, 'adsetNameInput fill mismatch');
     throw new Error(`광고 세트명 입력 실패: expected=${adsetName}, actual=${actualValue}`);
   }
@@ -306,7 +321,7 @@ async function enterAdsetFlow(page) {
     .first();
 
   try {
-    await adsetNameInput.waitFor({ state: 'visible', timeout: 30000 });
+    await adsetNameInput.waitFor({ state: 'visible', timeout: 180000 });
   } catch {
     await debugDump(page, 'enterAdsetFlow timeout');
     throw new Error('광고 세트 생성 모달(광고 세트 이름 지정 input)을 찾지 못했습니다.');
