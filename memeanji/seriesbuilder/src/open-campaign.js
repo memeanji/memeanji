@@ -56,6 +56,29 @@ async function ensureDirs() {
   await fs.mkdir(DIRS.screenshots, { recursive: true });
 }
 
+
+async function ensureLoggedInOrThrow(page) {
+  const loginHints = [
+    /로그인|login/i,
+    /facebook/i,
+    /계정/i,
+    /email|phone/i,
+  ];
+
+  const currentUrl = page.url();
+  if (/facebook\.com\/(login|checkpoint)/i.test(currentUrl)) {
+    throw new Error('로그인 화면이 감지되었습니다. 일반 Chrome에서 로그인 후 다시 실행해주세요.');
+  }
+
+  for (const hint of loginHints) {
+    if (await page.getByText(hint).first().isVisible({ timeout: 1000 }).catch(() => false)) {
+      if (await page.getByRole('button', { name: /로그인|login/i }).first().isVisible({ timeout: 1000 }).catch(() => false)) {
+        throw new Error('로그인 화면이 감지되었습니다. 일반 Chrome에서 로그인 후 다시 실행해주세요.');
+      }
+    }
+  }
+}
+
 async function clickCreateButton(page) {
   console.log('[STEP] 만들기 버튼 클릭');
   const createBtn = page.getByRole('button', { name: /만들기|create/i }).or(page.getByText(/만들기|create/i).first());
@@ -140,6 +163,7 @@ async function attachMediaFromFolderIfConfigured(page) {
 async function runFlow(page) {
   console.log('[STEP] Ads Manager 접속');
   await page.goto('https://adsmanager.facebook.com/adsmanager/manage/campaigns', { waitUntil: 'domcontentloaded' });
+  await ensureLoggedInOrThrow(page);
   await page.screenshot({ path: PATHS.step1, fullPage: true });
 
   console.log(`[STEP] 광고계정 이동: act=${AD_ACCOUNT_ID}`);

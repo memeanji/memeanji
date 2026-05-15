@@ -43,9 +43,9 @@ npm run login
 
 동작:
 1. `launchPersistentContext`로 기존 Chrome 사용자 프로필 실행
-2. Facebook/Meta 로그인 상태 확인
-3. Ads Manager 캠페인 화면 로딩 확인
-4. `auth/meta-session.json` 저장
+2. Ads Manager 페이지 오픈 (로그인 폼 자동 입력 없음)
+3. 사용자가 직접 로그인 상태를 확인
+4. Enter 입력 시 `auth/meta-session.json` 저장
 
 ## 5) 캠페인 열기 + 광고세트 이름 자동 입력
 
@@ -56,7 +56,7 @@ npm run open-campaign
 동작:
 1. `launchPersistentContext`로 동일 Chrome 프로필 재사용
 2. 저장된 세션(`auth/meta-session.json`) 재사용
-3. Ads Manager 접속
+3. Ads Manager 접속 후 로그인 화면 감지 시 자동진행 중단 및 안내 메시지 출력
 4. `act={AD_ACCOUNT_ID}` 계정으로 이동
 5. `CAMPAIGN_NAME`과 exact match 되는 캠페인 검색 후 진입
 6. `만들기` 클릭
@@ -98,3 +98,10 @@ npm run open-campaign
   - `getByPlaceholder`
   - `locator().filter()`
 - 변동성 큰 클래스 셀렉터 / xpath 남발 지양
+
+
+## 보안/정책 준수
+
+- Google OAuth / Facebook 로그인 폼 자동 입력은 수행하지 않습니다.
+- 자동화 탐지 우회(stealth plugin, user-agent 위조, `navigator.webdriver` 수정 등)를 사용하지 않습니다.
+- 사용자가 일반 Chrome에서 정상 로그인한 세션 재사용 방식만 사용합니다.
