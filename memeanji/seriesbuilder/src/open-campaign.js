@@ -57,6 +57,28 @@ async function ensureDirs() {
   await fs.mkdir(DIRS.screenshots, { recursive: true });
 }
 
+
+async function pause(page, label, ms = 2000) {
+  console.log(`[PAUSE] ${label} - ${ms}ms`);
+  await page.waitForTimeout(ms);
+}
+
+async function debugDump(page, reason) {
+  const placeholders = await page.locator('input[placeholder]').evaluateAll((els) => els.map((el) => el.getAttribute('placeholder') || '')).catch(() => []);
+  const inputValues = await page.locator('input').evaluateAll((els) => els.map((el) => el.value || '')).catch(() => []);
+  const buttonTexts = await page.locator('button, [role="button"], div').evaluateAll((els) => els.map((el) => (el.textContent || '').trim()).filter(Boolean).slice(0, 50)).catch(() => []);
+  const inputCount = await page.locator('input').count().catch(() => 0);
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+
+  console.log(`[DEBUG] ${reason} URL:`, page.url());
+  console.log(`[DEBUG] ${reason} TITLE:`, await page.title());
+  console.log(`[DEBUG] ${reason} input count:`, inputCount);
+  console.log(`[DEBUG] ${reason} input placeholders:`, placeholders);
+  console.log(`[DEBUG] ${reason} input values:`, inputValues);
+  console.log(`[DEBUG] ${reason} button texts(sample):`, buttonTexts);
+  console.log(`[DEBUG] ${reason} body text(1000):`, bodyText.slice(0, 1000));
+}
+
 async function ensureLoggedInOrThrow(page) {
   const currentUrl = page.url();
   if (/facebook\.com\/(login|checkpoint)/i.test(currentUrl)) {
@@ -130,10 +152,13 @@ async function closeViewCreatePanelIfOpened(page) {
     .getByRole('button', { name: /닫기|close|취소/i })
     .or(page.locator('[aria-label="닫기"], [aria-label="Close"]').first());
 
-  if (await closeBtn.first().isVisible({ timeout: 3000 }).catch(() => false)) await closeBtn.first().click();
-  else await page.keyboard.press('Escape').catch(() => {});
+  if (await closeBtn.first().isVisible({ timeout: 3000 }).catch(() => false)) {
+    await closeBtn.first().click();
+  } else {
+    await page.keyboard.press('Escape').catch(() => {});
+  }
 
-  await page.waitForTimeout(1000);
+  await pause(page, '보기 만들기 패널 닫기 후 대기', 2500);
   return true;
 }
 
@@ -156,31 +181,36 @@ async function clickLeftCreateButtonOnly(page) {
 
 async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   await closeViewCreatePanelIfOpened(page);
+  await pause(page, '광고 세트명 입력 전 대기', 2500);
 
   const adsetNameInput = page
-    .locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb, input[type="text"][value]')
+    .locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb')
     .first();
 
   try {
     await adsetNameInput.waitFor({ state: 'visible', timeout: 30000 });
   } catch {
-    const modalText = (await page.locator('[role="dialog"]').first().innerText().catch(() => '')).slice(0, 500);
-    console.log('[DEBUG] adset name input timeout URL:', page.url());
-    console.log('[DEBUG] adset name input timeout TITLE:', await page.title());
-    console.log('[DEBUG] adset name input modal text:', modalText);
+    await debugDump(page, 'adsetNameInput not found');
     throw new Error('광고 세트 이름 input을 찾지 못했습니다.');
   }
 
   await adsetNameInput.click({ timeout: 10000 });
+  await page.waitForTimeout(500);
   await adsetNameInput.press('Control+A');
+  await page.waitForTimeout(300);
   await page.keyboard.press('Backspace');
-  await adsetNameInput.type(adsetName, { delay: 30 });
+  await page.waitForTimeout(300);
+  await adsetNameInput.type(adsetName, { delay: 80 });
+  await page.waitForTimeout(1000);
 
-  const currentValue = await adsetNameInput.inputValue().catch(() => '');
-  console.log('[DEBUG] adset name input value:', currentValue);
-  if (currentValue.trim() !== adsetName) {
-    throw new Error(`광고 세트 이름 입력 검증 실패: expected="${adsetName}", actual="${currentValue}"`);
+  const actualValue = await adsetNameInput.inputValue().catch(() => '');
+  console.log('[DEBUG] adset input value after fill:', actualValue);
+  if (!actualValue.includes(adsetName)) {
+    await debugDump(page, 'adsetNameInput fill mismatch');
+    throw new Error(`광고 세트명 입력 실패: expected=${adsetName}, actual=${actualValue}`);
   }
+
+  await pause(page, '광고 세트명 입력 후 대기', 2000);
 
   const continueButton = page
     .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g')
@@ -189,16 +219,12 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
 
   const continueVisible = await continueButton.isVisible({ timeout: 30000 }).catch(() => false);
   if (!continueVisible) {
-    const modalText = (await page.locator('[role="dialog"]').first().innerText().catch(() => '')).slice(0, 500);
-    console.log('[DEBUG] continue button timeout URL:', page.url());
-    console.log('[DEBUG] continue button timeout TITLE:', await page.title());
-    console.log('[DEBUG] continue button modal text:', modalText);
+    await debugDump(page, 'continue button not found');
     throw new Error('textContent가 정확히 "계속"인 버튼을 찾지 못했습니다.');
   }
 
   await continueButton.click();
   await page.screenshot({ path: path.join(DIRS.screenshots, '08-adset-name-and-continue.png'), fullPage: true });
-
   await closeViewCreatePanelIfOpened(page);
 }
 
@@ -230,27 +256,14 @@ async function enterAdsetFlow(page) {
     .locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb')
     .first();
 
-  const inputCount = await page
-    .locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb')
-    .count();
-
   try {
     await adsetNameInput.waitFor({ state: 'visible', timeout: 30000 });
-    return;
   } catch {
-    const placeholders = await page
-      .locator('input[placeholder]')
-      .evaluateAll((els) => els.map((el) => el.getAttribute('placeholder') || '').filter(Boolean))
-      .catch(() => []);
-
-    console.log('[DEBUG] enterAdsetFlow timeout URL:', page.url());
-    console.log('[DEBUG] enterAdsetFlow timeout TITLE:', await page.title());
-    console.log('[DEBUG] enterAdsetFlow input placeholders:', placeholders);
-    console.log('[DEBUG] enterAdsetFlow matched input count:', inputCount);
-
+    await debugDump(page, 'enterAdsetFlow timeout');
     throw new Error('광고 세트 생성 모달(광고 세트 이름 지정 input)을 찾지 못했습니다.');
   }
 }
+
 
 async function attachMediaFromFolderIfConfigured(page) {
   if (!MEDIA_FOLDER_PATH) return;
@@ -274,7 +287,7 @@ async function runFlow(page) {
 
   console.log(`[STEP] 광고계정 이동: act=${AD_ACCOUNT_ID}`);
   await page.goto(`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${AD_ACCOUNT_ID}`, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(5000);
+  await pause(page, '광고계정 이동 후 대기', 3000);
   console.log('[DEBUG] URL:', page.url());
   console.log('[DEBUG] TITLE:', await page.title());
   await page.screenshot({ path: PATHS.step2, fullPage: true });
@@ -297,8 +310,10 @@ async function runFlow(page) {
     console.log(`[STEP] ${n + 1}/${ADSET_COUNT} 광고 세트 생성 시작: ${adsetName}`);
 
     await clickLeftCreateButtonOnly(page);
+    await pause(page, '만들기 버튼 클릭 후 대기', 3000);
     await page.screenshot({ path: PATHS.step5, fullPage: true });
     await enterAdsetFlow(page);
+    await pause(page, '광고 세트 생성 화면 진입 후 대기', 3000);
     await page.screenshot({ path: PATHS.step6, fullPage: true });
 
     await fillAdsetNameInAdsetModalOnly(page, adsetName);
