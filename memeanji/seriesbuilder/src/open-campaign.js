@@ -287,6 +287,8 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   await pause(page, '광고 세트명 입력 후 대기', 2000);
 
   await updateDateAndTimeBeforeContinue(page);
+  await setDuplicateCount(page, 5);
+  await page.waitForTimeout(5000);
   await clickContinueButtonOnly(page);
   await page.screenshot({ path: path.join(DIRS.screenshots, '08-adset-name-and-continue.png'), fullPage: true });
 
@@ -349,6 +351,97 @@ async function updateDateAndTimeBeforeContinue(page) {
       break;
     }
   }
+}
+
+
+async function setDuplicateCount(page, count = 5) {
+  console.log('[STEP] 복제 옵션 버튼 탐색');
+
+  const duplicateOptionButton = page
+    .locator('.x3nfvp2.x120ccyz.x1heor9g.x2lah0s.x1c4vz4f[role="presentation"]')
+    .first();
+
+  await duplicateOptionButton.waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForTimeout(5000);
+  await duplicateOptionButton.click({ force: true });
+  await page.waitForTimeout(5000);
+
+  console.log('[STEP] 복제 개수 input 탐색');
+
+  let duplicateInput = null;
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const inputs = await page.locator('input').elementHandles();
+
+    for (const input of inputs) {
+      const value = await input.getAttribute('value');
+      const type = await input.getAttribute('type');
+      const className = await input.getAttribute('class');
+
+      console.log('[DEBUG] duplicate input candidate:', {
+        attempt,
+        type,
+        value,
+        className,
+      });
+
+      const isNumberOnly = value && /^\d+$/.test(value);
+      const isNotDate = value && !value.includes('년') && !value.includes('월') && !value.includes('일');
+      const isNotTime = value && !value.includes(':');
+
+      if (isNumberOnly && isNotDate && isNotTime) {
+        duplicateInput = input;
+        break;
+      }
+    }
+
+    if (duplicateInput) break;
+
+    console.log(`[WAIT] 복제 개수 input 탐색 재시도 ${attempt}/5`);
+    await page.waitForTimeout(5000);
+  }
+
+  if (!duplicateInput) {
+    await page.screenshot({
+      path: path.join(DIRS.screenshots, 'duplicate-count-input-not-found.png'),
+      fullPage: true,
+    });
+    throw new Error('복제 개수 input을 찾지 못했습니다.');
+  }
+
+  await duplicateInput.click();
+  await page.waitForTimeout(1000);
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(500);
+  await page.keyboard.type(String(count), { delay: 80 });
+  await page.waitForTimeout(2000);
+
+  let actualValue = await duplicateInput.evaluate((el) => el.value);
+  console.log('[DEBUG] duplicate count after keyboard input:', actualValue);
+
+  if (actualValue !== String(count)) {
+    console.log('[WARN] 키보드 입력으로 복제 개수 변경 실패 - DOM value 직접 변경 fallback');
+
+    await duplicateInput.evaluate((el, value) => {
+      el.focus();
+      el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, String(count));
+
+    await page.waitForTimeout(2000);
+    actualValue = await duplicateInput.evaluate((el) => el.value);
+  }
+
+  console.log('[DEBUG] final duplicate count:', actualValue);
+
+  if (actualValue !== String(count)) {
+    throw new Error(`복제 개수 변경 실패: expected=${count}, actual=${actualValue}`);
+  }
+
+  console.log(`[STEP] 복제 개수 ${count}개 설정 완료`);
 }
 
 async function clickContinueButtonOnly(page) {
