@@ -183,28 +183,66 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   await closeViewCreatePanelIfOpened(page);
   await pause(page, '광고 세트명 입력 전 대기', 2500);
 
-  const adsetNameInput = page
-    .locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb')
-    .first();
+  const broadLocator = page.locator(
+    'input[placeholder="광고 세트 이름 지정"], input._58al._aghb[type="text"], input[type="text"][value*="리타겟"], input[type="text"][value*="광고세트"], input[data-auto-logging-id]'
+  );
 
-  try {
-    await adsetNameInput.waitFor({ state: 'visible', timeout: 30000 });
-  } catch {
+  const broadCount = await broadLocator.count();
+  console.log('[DEBUG] adset input broad candidate count:', broadCount);
+
+  let targetInputHandle = null;
+  const inputs = await page.locator('input[type="text"]').elementHandles();
+
+  for (const input of inputs) {
+    const value = await input.getAttribute('value');
+    const placeholder = await input.getAttribute('placeholder');
+    const className = await input.getAttribute('class');
+
+    console.log('[DEBUG] input candidate:', { value, placeholder, className });
+
+    if (
+      placeholder === '광고 세트 이름 지정' ||
+      value?.includes('리타겟') ||
+      value?.includes('광고세트') ||
+      className?.includes('_58al')
+    ) {
+      targetInputHandle = input;
+      break;
+    }
+  }
+
+  if (!targetInputHandle) {
     await debugDump(page, 'adsetNameInput not found');
+    await page.screenshot({ path: path.join(DIRS.screenshots, 'adset-name-input-not-found.png'), fullPage: true });
     throw new Error('광고 세트 이름 input을 찾지 못했습니다.');
   }
 
-  await adsetNameInput.click({ timeout: 10000 });
+  await targetInputHandle.asElement().click();
   await page.waitForTimeout(500);
-  await adsetNameInput.press('Control+A');
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
   await page.waitForTimeout(300);
   await page.keyboard.press('Backspace');
   await page.waitForTimeout(300);
-  await adsetNameInput.type(adsetName, { delay: 80 });
+  await page.keyboard.type(adsetName, { delay: 80 });
   await page.waitForTimeout(1000);
 
-  const actualValue = await adsetNameInput.inputValue().catch(() => '');
-  console.log('[DEBUG] adset input value after fill:', actualValue);
+  let actualValue = await targetInputHandle.evaluate((el) => el.value || '');
+  console.log('[DEBUG] actual adset input value:', actualValue);
+
+  if (!actualValue.includes(adsetName)) {
+    console.log('[DEBUG] keyboard.type 미반영 - DOM value fallback 적용');
+    await targetInputHandle.evaluate((el, value) => {
+      el.focus();
+      el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, adsetName);
+
+    await page.waitForTimeout(1000);
+    actualValue = await targetInputHandle.evaluate((el) => el.value || '');
+    console.log('[DEBUG] actual adset input value after fallback:', actualValue);
+  }
+
   if (!actualValue.includes(adsetName)) {
     await debugDump(page, 'adsetNameInput fill mismatch');
     throw new Error(`광고 세트명 입력 실패: expected=${adsetName}, actual=${actualValue}`);
@@ -212,19 +250,30 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
 
   await pause(page, '광고 세트명 입력 후 대기', 2000);
 
-  const continueButton = page
-    .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g')
-    .filter({ hasText: /^계속$/ })
-    .first();
-
-  const continueVisible = await continueButton.isVisible({ timeout: 30000 }).catch(() => false);
-  if (!continueVisible) {
-    await debugDump(page, 'continue button not found');
-    throw new Error('textContent가 정확히 "계속"인 버튼을 찾지 못했습니다.');
+  const nextCandidates = page.locator('.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli');
+  const nextCount = await nextCandidates.count();
+  for (let i = 0; i < nextCount; i += 1) {
+    const c = nextCandidates.nth(i);
+    const text = (await c.innerText().catch(() => '')).trim();
+    const box = await c.boundingBox().catch(() => null);
+    console.log('[DEBUG] next button candidate:', { index: i, text, box });
   }
 
-  await continueButton.click();
+  const nextButton = nextCandidates
+    .filter({ hasText: /다음|계속|만들기|완료/i })
+    .first();
+
+  const visible = await nextButton.isVisible({ timeout: 15000 }).catch(() => false);
+  if (!visible) {
+    await debugDump(page, 'next button not found');
+    throw new Error('다음 단계 버튼을 찾지 못했습니다.');
+  }
+
+  await page.waitForTimeout(1000);
+  await nextButton.click({ timeout: 10000 });
+  await page.waitForTimeout(3000);
   await page.screenshot({ path: path.join(DIRS.screenshots, '08-adset-name-and-continue.png'), fullPage: true });
+
   await closeViewCreatePanelIfOpened(page);
 }
 
