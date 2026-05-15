@@ -243,7 +243,7 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
 
     if (!targetInputHandle) {
       console.log('[WAIT] 광고 세트 이름 input 탐색 중... (2s 재시도)');
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(5000);
     }
   }
 
@@ -284,15 +284,7 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
     throw new Error(`광고 세트명 입력 실패: expected=${adsetName}, actual=${actualValue}`);
   }
 
-  await pause(page, '광고 세트명 입력 후 대기', 2000);
-
-  const scheduleReady = await updateDateAndTimeBeforeContinue(page);
-  if (!scheduleReady) {
-    throw new Error('스케줄링 영역 확인 실패: 날짜 input을 찾지 못했습니다.');
-  }
-
-  await setDuplicateCount(page, 5);
-  await page.waitForTimeout(5000);
+  await pause(page, '광고 세트명 입력 후 대기', 5000);
   await clickContinueButtonOnly(page);
   await page.screenshot({ path: path.join(DIRS.screenshots, '08-adset-name-and-continue.png'), fullPage: true });
 
@@ -486,6 +478,7 @@ async function setDuplicateCount(page, count = 5) {
 }
 
 async function clickContinueButtonOnly(page) {
+  await pause(page, '계속 버튼 탐색 전 대기', 5000);
   let continueButton = null;
 
   for (let attempt = 1; attempt <= 8 && !continueButton; attempt += 1) {
@@ -509,7 +502,7 @@ async function clickContinueButtonOnly(page) {
     if (!continueButton) {
       console.log(`[WAIT] 계속 버튼 탐색 재시도 ${attempt}/8`);
       await page.mouse.wheel(0, 120);
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(5000);
     }
   }
 
@@ -610,6 +603,16 @@ async function runFlow(page) {
     await page.screenshot({ path: PATHS.step6, fullPage: true });
 
     await fillAdsetNameInAdsetModalOnly(page, adsetName);
+
+    const scheduleReady = await updateDateAndTimeBeforeContinue(page);
+    if (!scheduleReady) {
+      throw new Error('스케줄링 영역 확인 실패: 날짜 input을 찾지 못했습니다.');
+    }
+
+    await pause(page, '스케줄링 후 복제 설정 전 대기', 5000);
+    await setDuplicateCount(page, 5);
+    await pause(page, '복제 설정 후 대기', 5000);
+
     if (ADSET_DAILY_BUDGET) {
       await fillAdsetBudgetInModalOnly(page, ADSET_DAILY_BUDGET);
     }
