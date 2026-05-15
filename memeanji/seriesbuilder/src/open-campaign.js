@@ -438,18 +438,30 @@ async function openDuplicateMenuViaIcons(page) {
   await pause(page, '더보기 토글 탐색 전 대기', 3000);
 
   const toggleButton = page
-    .locator('div[role="button"][aria-busy="false"]')
+    .locator('div[role="button"][aria-busy="false"].x1i10hfl.xjqpnuy.xc5r6h4.xqeqjp1.x1phubyo')
     .filter({ has: page.locator('.xtwfq29') })
     .first();
 
   let toggled = false;
   for (let attempt = 1; attempt <= 8 && !toggled; attempt += 1) {
-    const visible = await toggleButton.isVisible({ timeout: 3000 }).catch(() => false);
-    console.log(`[DEBUG] toggle button visible attempt ${attempt}/8:`, visible);
+    let target = toggleButton;
+    let visible = await target.isVisible({ timeout: 3000 }).catch(() => false);
+
+    if (!visible) {
+      const fallback = page.locator('div[role="button"][aria-busy="false"]').filter({ has: page.locator('.xtwfq29') }).first();
+      const fallbackVisible = await fallback.isVisible({ timeout: 1500 }).catch(() => false);
+      if (fallbackVisible) {
+        target = fallback;
+        visible = true;
+      }
+    }
+
+    const boxPreview = await target.boundingBox().catch(() => null);
+    console.log(`[DEBUG] toggle button visible attempt ${attempt}/8:`, { visible, box: boxPreview });
 
     if (visible) {
-      await toggleButton.click({ force: true }).catch(async () => {
-        const box = await toggleButton.boundingBox();
+      await target.click({ force: true }).catch(async () => {
+        const box = await target.boundingBox();
         if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       });
 
