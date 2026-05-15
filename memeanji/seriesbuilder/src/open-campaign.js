@@ -30,14 +30,13 @@ function validateEnv() {
   if (!ADSET_INDEX) throw new Error('ADSET_INDEX is missing in .env');
 }
 
-
 function normalizeText(value) {
   return value.replace(/\s+/g, '').toLowerCase();
 }
 
 function campaignPatternFromInput(value) {
-  const escaped = value.replace(/[.*+?^${}()|[\]\]/g, '\$&');
-  return new RegExp(escaped.replace(/\s+/g, '\s*'), 'i');
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(escaped.replace(/\s+/g, '\\s*'), 'i');
 }
 
 async function trySearchBox(page, keyword) {
@@ -68,8 +67,7 @@ async function logCampaignCandidates(page, limit = 10) {
   for (let i = 0; i < rowCount && candidates.length < limit; i += 1) {
     const text = (await rows.nth(i).innerText().catch(() => '')).trim();
     if (text.length >= 2) {
-      const firstLine = text.split('
-')[0].trim();
+      const firstLine = text.split('\n')[0].trim();
       if (firstLine) candidates.push(firstLine);
     }
   }
@@ -103,6 +101,38 @@ async function ensureLoggedInOrThrow(page) {
   if (/facebook\.com\/(login|checkpoint)/i.test(currentUrl)) {
     throw new Error('로그인 화면이 감지되었습니다. 일반 Chrome에서 Meta 로그인 후 다시 실행해주세요.');
   }
+}
+
+async function findCampaignTarget(page, keyword) {
+  const normalizedKeyword = normalizeText(keyword);
+  const regex = campaignPatternFromInput(keyword);
+
+  // 1) data-tooltip-content partial
+  const tooltipMatch = page.locator('[data-tooltip-content]').filter({ hasText: regex }).first();
+  if (await tooltipMatch.isVisible({ timeout: 5000 }).catch(() => false)) return tooltipMatch;
+
+  const tooltipAttrMatch = page.locator(`[data-tooltip-content*="${keyword}"]`).first();
+  if (await tooltipAttrMatch.isVisible({ timeout: 3000 }).catch(() => false)) return tooltipAttrMatch;
+
+  // 2) span._3dfi._3dfj partial
+  const spanMatch = page.locator('span._3dfi._3dfj').filter({ hasText: regex }).first();
+  if (await spanMatch.isVisible({ timeout: 5000 }).catch(() => false)) return spanMatch;
+
+  // 3) getByText fallback partial
+  const textMatch = page.getByText(regex).first();
+  if (await textMatch.isVisible({ timeout: 5000 }).catch(() => false)) return textMatch;
+
+  // 4) whitespace-insensitive row scan fallback
+  const rows = page.getByRole('row');
+  const rowCount = await rows.count();
+  for (let i = 0; i < rowCount; i += 1) {
+    const text = await rows.nth(i).innerText().catch(() => '');
+    if (normalizeText(text).includes(normalizedKeyword)) {
+      return rows.nth(i);
+    }
+  }
+
+  return null;
 }
 
 async function attachMediaFromFolderIfConfigured(page) {
@@ -147,32 +177,24 @@ async function runFlow(page) {
   console.log(`[STEP] 광고계정 이동: act=${AD_ACCOUNT_ID}`);
   const targetUrl = `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${AD_ACCOUNT_ID}`;
   await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(5000);
 
   console.log('[DEBUG] URL:', page.url());
   console.log('[DEBUG] TITLE:', await page.title());
 
-  const campaignReady = page
-    .getByRole('tab', { name: /캠페인|campaigns/i })
-    .or(page.getByRole('link', { name: /캠페인|campaigns/i }))
-    .or(page.getByText(/캠페인|campaigns/i).first())
-    .or(page.getByRole('grid').first())
-    .or(page.getByRole('table').first());
-
-  const isCampaignUrl = /\/campaigns/i.test(page.url());
-  if (!isCampaignUrl) {
-    await campaignReady.first().waitFor({ timeout: 60000 });
-  }
-
   await page.screenshot({ path: PATHS.step2, fullPage: true });
 
-  const exactCampaignRegex = new RegExp(`^${CAMPAIGN_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
-  const campaignRow = page.getByRole('row').filter({ has: page.getByText(exactCampaignRegex) }).first();
-  await campaignRow.waitFor({ timeout: 60000 });
+  await trySearchBox(page, CAMPAIGN_NAME);
+  const campaignTarget = await findCampaignTarget(page, CAMPAIGN_NAME);
+
+  if (!campaignTarget) {
+    await logCampaignCandidates(page, 10);
+    throw new Error(`CAMPAIGN_NAME partial match 실패: ${CAMPAIGN_NAME}`);
+  }
+
+  await campaignTarget.click();
   await page.screenshot({ path: PATHS.step3, fullPage: true });
 
-  await campaignRow.getByText(exactCampaignRegex).first().click();
   await page.waitForLoadState('domcontentloaded');
   await page.screenshot({ path: PATHS.step4, fullPage: true });
 
