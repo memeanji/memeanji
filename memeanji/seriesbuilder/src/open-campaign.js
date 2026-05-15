@@ -286,7 +286,11 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
 
   await pause(page, '광고 세트명 입력 후 대기', 2000);
 
-  await updateDateAndTimeBeforeContinue(page);
+  const scheduleReady = await updateDateAndTimeBeforeContinue(page);
+  if (!scheduleReady) {
+    throw new Error('스케줄링 영역 확인 실패: 날짜 input을 찾지 못했습니다.');
+  }
+
   await setDuplicateCount(page, 5);
   await page.waitForTimeout(5000);
   await clickContinueButtonOnly(page);
@@ -300,12 +304,23 @@ async function updateDateAndTimeBeforeContinue(page) {
   await page.mouse.wheel(0, 500);
   await pause(page, '스크롤 후 날짜/시간 영역 대기', 1000);
 
-  const dateInput = page.locator('input[placeholder="yyyy-mm-dd"]').first();
-  const dateVisible = await dateInput.isVisible({ timeout: 15000 }).catch(() => false);
+  let dateInput = null;
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    const candidate = page.locator('input[placeholder="yyyy-mm-dd"]').first();
+    const visible = await candidate.isVisible({ timeout: 5000 }).catch(() => false);
+    if (visible) {
+      dateInput = candidate;
+      break;
+    }
+    console.log(`[WAIT] 날짜 input 탐색 재시도 ${attempt}/6`);
+    await page.mouse.wheel(0, 250);
+    await page.waitForTimeout(2000);
+  }
 
-  if (!dateVisible) {
-    console.log('[DEBUG] 날짜 input 미감지 - 날짜/시간 변경 건너뜀');
-    return;
+  if (!dateInput) {
+    console.log('[DEBUG] 날짜 input 미감지 - 스케줄링 단계 미확인');
+    await debugDump(page, 'schedule input not found');
+    return false;
   }
 
   const currentDateText = await dateInput.inputValue().catch(() => '');
@@ -351,20 +366,44 @@ async function updateDateAndTimeBeforeContinue(page) {
       break;
     }
   }
+
+  return true;
 }
 
 
 async function setDuplicateCount(page, count = 5) {
   console.log('[STEP] 복제 옵션 버튼 탐색');
 
-  const duplicateOptionButton = page
-    .locator('.x3nfvp2.x120ccyz.x1heor9g.x2lah0s.x1c4vz4f[role="presentation"]')
-    .first();
+  const duplicateButtons = page.locator('.x3nfvp2.x120ccyz.x1heor9g.x2lah0s.x1c4vz4f[role="presentation"]');
+  let clicked = false;
 
-  await duplicateOptionButton.waitFor({ state: 'visible', timeout: 30000 });
-  await page.waitForTimeout(5000);
-  await duplicateOptionButton.click({ force: true });
-  await page.waitForTimeout(5000);
+  for (let attempt = 1; attempt <= 8 && !clicked; attempt += 1) {
+    const count = await duplicateButtons.count();
+    for (let i = 0; i < count; i += 1) {
+      const btn = duplicateButtons.nth(i);
+      const box = await btn.boundingBox().catch(() => null);
+      const visible = await btn.isVisible().catch(() => false);
+      console.log('[DEBUG] duplicate option candidate:', { attempt, index: i, visible, box });
+      if (!visible || !box) continue;
+      await btn.click({ force: true }).catch(async () => {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+      clicked = true;
+      break;
+    }
+    if (!clicked) {
+      console.log(`[WAIT] 복제 옵션 버튼 탐색 재시도 ${attempt}/8`);
+      await page.mouse.wheel(0, 200);
+      await page.waitForTimeout(2500);
+    }
+  }
+
+  if (!clicked) {
+    await debugDump(page, 'duplicate option button not found');
+    throw new Error('복제 옵션 버튼을 찾지 못했습니다.');
+  }
+
+  await page.waitForTimeout(3000);
 
   console.log('[STEP] 복제 개수 input 탐색');
 
