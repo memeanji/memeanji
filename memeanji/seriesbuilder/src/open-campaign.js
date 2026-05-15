@@ -431,8 +431,8 @@ async function ensureCampaignStructureRoot(page) {
   throw new Error('id="campaign_structure_tree_root"를 찾지 못했습니다.');
 }
 
-async function openAdRowActionMenuOnly(page) {
-  console.log('[STEP] 새 판매 광고 작업 메뉴 클릭 테스트 시작');
+async function openCorrectAdActionMenu(page) {
+  console.log('[STEP] 새 판매 광고 row 기준 작업 메뉴 탐색');
 
   await ensureCampaignStructureRoot(page);
   await page.waitForTimeout(5000);
@@ -449,102 +449,81 @@ async function openAdRowActionMenuOnly(page) {
   const adRowBox = await adRow.boundingBox();
 
   if (!adRowBox) {
-    throw new Error('새 판매 광고 텍스트 위치를 찾지 못했습니다.');
+    throw new Error('새 판매 광고 row 위치를 찾지 못했습니다.');
   }
 
   console.log('[DEBUG] 새 판매 광고 row box:', adRowBox);
 
-  const actionMenuByText = page.locator('text=작업 메뉴').first();
+  const menuCandidates = await page.locator(
+    '.x6s0dn4.x78zum5.x1q0g3np.xozqiw3.x2lwn1j.xeuugli.x1iyjqo2.x8va1my.x1hc1fzr.x13dflua.x6o7n8i.xxziih7.x12w9bfk.xl56j7k.xh8yej3'
+  ).elementHandles();
 
-  if (await actionMenuByText.count()) {
-    const actionBox = await actionMenuByText.boundingBox();
-    console.log('[DEBUG] 작업 메뉴 text box:', actionBox);
+  let targetMenu = null;
 
-    if (actionBox) {
-      await page.waitForTimeout(5000);
-      await page.mouse.click(actionBox.x + actionBox.width / 2, actionBox.y + actionBox.height / 2);
-      await page.waitForTimeout(7000);
+  for (const candidate of menuCandidates) {
+    const box = await candidate.boundingBox();
 
-      const bodyText = await page.locator('body').innerText();
-      console.log('[DEBUG] after 작업 메뉴 text click body:', bodyText.slice(0, 2000));
+    if (!box) continue;
 
-      if (
-        bodyText.includes('이 광고에 대한 작업')
-        || bodyText.includes('복제')
-        || bodyText.includes('빠른 복제')
-        || bodyText.includes('삭제')
-      ) {
-        console.log('[STEP] 작업 메뉴 열기 성공 - text 기준');
-        return true;
-      }
+    const sameRow = Math.abs((box.y + box.height / 2) - (adRowBox.y + adRowBox.height / 2)) < 15;
+    const rightSide = box.x > adRowBox.x;
+
+    console.log('[DEBUG] 작업 메뉴 candidate:', { box, sameRow, rightSide });
+
+    if (sameRow && rightSide) {
+      targetMenu = candidate;
+      break;
     }
   }
 
-  const clickY = adRowBox.y + adRowBox.height / 2;
+  if (!targetMenu) {
+    await page.screenshot({
+      path: path.join(DIRS.screenshots, 'ad-row-menu-not-found.png'),
+      fullPage: true,
+    });
 
-  for (const clickX of [320, 330, 340, 350]) {
-    console.log('[STEP] 작업 메뉴 좌표 클릭 재시도:', { clickX, clickY });
-
-    await page.waitForTimeout(5000);
-    await page.mouse.click(clickX, clickY);
-    await page.waitForTimeout(7000);
-
-    const bodyText = await page.locator('body').innerText();
-    console.log('[DEBUG] after 작업 메뉴 coordinate click body:', bodyText.slice(0, 2000));
-
-    if (
-      bodyText.includes('이 광고에 대한 작업')
-      || bodyText.includes('복제')
-      || bodyText.includes('빠른 복제')
-      || bodyText.includes('삭제')
-    ) {
-      console.log(`[STEP] 작업 메뉴 열기 성공 - 좌표 기준 x=${clickX}`);
-      return true;
-    }
+    throw new Error('새 판매 광고 row의 작업 메뉴를 찾지 못했습니다.');
   }
 
-  await page.screenshot({
-    path: path.join(DIRS.screenshots, 'open-ad-row-action-menu-failed.png'),
-    fullPage: true,
-  });
+  const menuBox = await targetMenu.boundingBox();
 
-  throw new Error('새 판매 광고 행의 작업 메뉴를 열지 못했습니다.');
+  if (!menuBox) {
+    throw new Error('새 판매 광고 row의 작업 메뉴 좌표를 찾지 못했습니다.');
+  }
+
+  console.log('[DEBUG] 최종 작업 메뉴 box:', menuBox);
+
+  await page.waitForTimeout(5000);
+  await page.mouse.click(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2);
+  await page.waitForTimeout(7000);
+
+  const bodyText = await page.locator('body').innerText();
+
+  console.log('[DEBUG] 작업 메뉴 클릭 후 body text:', bodyText.slice(0, 3000));
+
+  if (!bodyText.includes('이 광고에 대한 작업') && !bodyText.includes('복제')) {
+    throw new Error('작업 메뉴는 클릭했지만 복제 메뉴가 열리지 않았습니다.');
+  }
+
+  console.log('[STEP] 작업 메뉴 열기 성공');
 }
 
 async function setDuplicateCount(page, count = 5) {
   console.log('[STEP] 복제 옵션 버튼 탐색');
-  await openAdRowActionMenuOnly(page);
+  await openCorrectAdActionMenu(page);
 
-  const duplicateButtons = page.locator('.x3nfvp2.x120ccyz.x1heor9g.x2lah0s.x1c4vz4f[role="presentation"]');
-  let clicked = false;
+  const duplicateButton = page.locator('div, span, button')
+    .filter({ hasText: /^복제$/ })
+    .first();
 
-  for (let attempt = 1; attempt <= 8 && !clicked; attempt += 1) {
-    const count = await duplicateButtons.count();
-    for (let i = 0; i < count; i += 1) {
-      const btn = duplicateButtons.nth(i);
-      const box = await btn.boundingBox().catch(() => null);
-      const visible = await btn.isVisible().catch(() => false);
-      console.log('[DEBUG] duplicate option candidate:', { attempt, index: i, visible, box });
-      if (!visible || !box) continue;
-      await btn.click({ force: true }).catch(async () => {
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-      });
-      clicked = true;
-      break;
-    }
-    if (!clicked) {
-      console.log(`[WAIT] 복제 옵션 버튼 탐색 재시도 ${attempt}/8`);
-      await page.mouse.wheel(0, 200);
-      await page.waitForTimeout(2500);
-    }
-  }
+  await duplicateButton.waitFor({
+    state: 'visible',
+    timeout: 30000,
+  });
 
-  if (!clicked) {
-    await debugDump(page, 'duplicate option button not found');
-    throw new Error('복제 옵션 버튼을 찾지 못했습니다.');
-  }
-
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(5000);
+  await duplicateButton.click({ force: true });
+  await page.waitForTimeout(7000);
 
   console.log('[STEP] 복제 개수 input 탐색');
 
@@ -757,9 +736,9 @@ async function runFlow(page) {
       throw new Error('스케줄링 영역 확인 실패: 날짜 input을 찾지 못했습니다.');
     }
 
-    await pause(page, '스케줄링 후 작업 메뉴 테스트 전 대기', 5000);
-    await openAdRowActionMenuOnly(page);
-    await pause(page, '작업 메뉴 열기 테스트 후 대기', 7000);
+    await pause(page, '스케줄링 후 복제 설정 전 대기', 5000);
+    await setDuplicateCount(page, 5);
+    await pause(page, '복제 설정 후 대기', 7000);
 
     if (ADSET_DAILY_BUDGET) {
       await fillAdsetBudgetInModalOnly(page, ADSET_DAILY_BUDGET);
