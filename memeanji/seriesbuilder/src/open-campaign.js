@@ -158,6 +158,27 @@ async function closeViewCreatePanelIfOpened(page) {
   return true;
 }
 
+
+async function clickLeftCreateButtonOnly(page) {
+  const createCandidates = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g');
+  const count = await createCandidates.count();
+
+  for (let i = 0; i < count; i += 1) {
+    const candidate = createCandidates.nth(i);
+    const text = (await candidate.innerText().catch(() => '')).trim();
+    console.log('[DEBUG] create button text:', text);
+
+    if (!text) continue;
+    if (text.includes('보기 만들기')) continue;
+    if (text === '만들기') {
+      await candidate.click();
+      return;
+    }
+  }
+
+  throw new Error('왼쪽 "+ 만들기" 버튼을 찾지 못했습니다. (보기 만들기 제외 조건)');
+}
+
 async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   await closeViewCreatePanelIfOpened(page);
 
@@ -274,8 +295,7 @@ async function runFlow(page) {
   await page.waitForLoadState('domcontentloaded');
   await page.screenshot({ path: PATHS.step4, fullPage: true });
 
-  const createBtn = page.getByRole('button', { name: /만들기|create/i }).or(page.getByText(/만들기|create/i).first());
-  await createBtn.first().click();
+  await clickLeftCreateButtonOnly(page);
   await page.screenshot({ path: PATHS.step5, fullPage: true });
 
   const adsetOption = page
