@@ -30,6 +30,61 @@ function validateEnv() {
   if (!ADSET_INDEX) throw new Error('ADSET_INDEX is missing in .env');
 }
 
+
+function normalizeText(value) {
+  return value.replace(/\s+/g, '').toLowerCase();
+}
+
+function campaignPatternFromInput(value) {
+  const escaped = value.replace(/[.*+?^${}()|[\]\]/g, '\$&');
+  return new RegExp(escaped.replace(/\s+/g, '\s*'), 'i');
+}
+
+async function trySearchBox(page, keyword) {
+  const searchInput = page
+    .getByPlaceholder(/검색|search|필터|filter/i)
+    .or(page.getByRole('searchbox'))
+    .or(page.getByLabel(/검색|search|필터|filter/i));
+
+  if (await searchInput.first().isVisible({ timeout: 3000 }).catch(() => false)) {
+    console.log('[STEP] 캠페인 검색창 감지 - 검색어 입력 시도');
+    await searchInput.first().click();
+    await searchInput.first().fill('');
+    await searchInput.first().fill(keyword);
+    await page.keyboard.press('Enter').catch(() => {});
+    await page.waitForTimeout(3000);
+    return true;
+  }
+
+  console.log('[STEP] 캠페인 검색창 미감지 - 목록에서 직접 탐색');
+  return false;
+}
+
+async function logCampaignCandidates(page, limit = 10) {
+  const rows = page.getByRole('row');
+  const rowCount = await rows.count();
+  const candidates = [];
+
+  for (let i = 0; i < rowCount && candidates.length < limit; i += 1) {
+    const text = (await rows.nth(i).innerText().catch(() => '')).trim();
+    if (text.length >= 2) {
+      const firstLine = text.split('
+')[0].trim();
+      if (firstLine) candidates.push(firstLine);
+    }
+  }
+
+  console.log('[DEBUG] 화면 캠페인 후보(최대 10개):');
+  if (candidates.length === 0) {
+    console.log('  - (추출 실패: row text 없음)');
+    return;
+  }
+
+  candidates.forEach((name, idx) => {
+    console.log(`  ${idx + 1}. ${name}`);
+  });
+}
+
 function getTodayMMDD() {
   const now = new Date();
   return `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
