@@ -411,8 +411,32 @@ async function updateDateAndTimeBeforeContinue(page) {
 }
 
 
+
+async function openDuplicateMenuViaIcons(page) {
+  console.log('[STEP] 복제 메뉴 사전 진입: xtwfq29 -> x1mcwxda');
+
+  const entryIcon = page.locator('.xtwfq29').first();
+  await entryIcon.waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForTimeout(2000);
+  await entryIcon.click({ force: true }).catch(async () => {
+    const box = await entryIcon.boundingBox();
+    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  });
+  await page.waitForTimeout(2500);
+
+  const duplicateButton = page.locator('.x1mcwxda').first();
+  await duplicateButton.waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForTimeout(1500);
+  await duplicateButton.click({ force: true }).catch(async () => {
+    const box = await duplicateButton.boundingBox();
+    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  });
+  await page.waitForTimeout(3000);
+}
+
 async function setDuplicateCount(page, count = 5) {
   console.log('[STEP] 복제 옵션 버튼 탐색');
+  await openDuplicateMenuViaIcons(page);
 
   const duplicateButtons = page.locator('.x3nfvp2.x120ccyz.x1heor9g.x2lah0s.x1c4vz4f[role="presentation"]');
   let clicked = false;
