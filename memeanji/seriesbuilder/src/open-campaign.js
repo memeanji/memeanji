@@ -6,6 +6,10 @@ import { chromium } from 'playwright';
 const AD_ACCOUNT_ID = process.env.AD_ACCOUNT_ID;
 const CAMPAIGN_NAME = process.env.CAMPAIGN_NAME;
 const ADSET_INDEX = process.env.ADSET_INDEX;
+const ADSET_BASE_NAME = process.env.ADSET_BASE_NAME || '리타겟';
+const ADSET_START_INDEX = Number(process.env.ADSET_START_INDEX || ADSET_INDEX || 1);
+const ADSET_COUNT = Number(process.env.ADSET_COUNT || 1);
+const ADSET_DAILY_BUDGET = process.env.ADSET_DAILY_BUDGET;
 const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
 const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 
@@ -27,7 +31,8 @@ const PATHS = {
 function validateEnv() {
   if (!AD_ACCOUNT_ID) throw new Error('AD_ACCOUNT_ID is missing in .env');
   if (!CAMPAIGN_NAME) throw new Error('CAMPAIGN_NAME is missing in .env');
-  if (!ADSET_INDEX) throw new Error('ADSET_INDEX is missing in .env');
+  if (!Number.isFinite(ADSET_START_INDEX)) throw new Error('ADSET_START_INDEX must be a number');
+  if (!Number.isFinite(ADSET_COUNT) || ADSET_COUNT < 1) throw new Error('ADSET_COUNT must be >= 1');
 }
 
 function normalizeText(value) {
@@ -37,6 +42,26 @@ function normalizeText(value) {
 function campaignPatternFromInput(value) {
   const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(escaped.replace(/\s+/g, '\\s*'), 'i');
+}
+
+function getTodayMMDD() {
+  const now = new Date();
+  return `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function getAdsetName(index) {
+  return `${getTodayMMDD()} ${ADSET_BASE_NAME} ${index}번 광고세트`;
+}
+
+async function ensureDirs() {
+  await fs.mkdir(DIRS.screenshots, { recursive: true });
+}
+
+async function ensureLoggedInOrThrow(page) {
+  const currentUrl = page.url();
+  if (/facebook\.com\/(login|checkpoint)/i.test(currentUrl)) {
+    throw new Error('로그인 화면이 감지되었습니다. 일반 Chrome에서 Meta 로그인 후 다시 실행해주세요.');
+  }
 }
 
 async function trySearchBox(page, keyword) {
@@ -61,80 +86,37 @@ async function trySearchBox(page, keyword) {
   return true;
 }
 
-
 async function logCampaignCandidates(page, limit = 10) {
   const rows = page.getByRole('row');
   const rowCount = await rows.count();
   const candidates = [];
-
   for (let i = 0; i < rowCount && candidates.length < limit; i += 1) {
     const text = (await rows.nth(i).innerText().catch(() => '')).trim();
-    if (text.length >= 2) {
-      const firstLine = text.split('\n')[0].trim();
-      if (firstLine) candidates.push(firstLine);
-    }
+    if (text.length >= 2) candidates.push(text.split('\n')[0].trim());
   }
-
   console.log('[DEBUG] 화면 캠페인 후보(최대 10개):');
-  if (candidates.length === 0) {
-    console.log('  - (추출 실패: row text 없음)');
-    return;
-  }
-
-  candidates.forEach((name, idx) => {
-    console.log(`  ${idx + 1}. ${name}`);
-  });
-}
-
-function getTodayMMDD() {
-  const now = new Date();
-  return `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-}
-
-function getAdsetName() {
-  return `${getTodayMMDD()} 리타겟 ${ADSET_INDEX}번 광고세트`;
-}
-
-async function ensureDirs() {
-  await fs.mkdir(DIRS.screenshots, { recursive: true });
-}
-
-async function ensureLoggedInOrThrow(page) {
-  const currentUrl = page.url();
-  if (/facebook\.com\/(login|checkpoint)/i.test(currentUrl)) {
-    throw new Error('로그인 화면이 감지되었습니다. 일반 Chrome에서 Meta 로그인 후 다시 실행해주세요.');
-  }
+  candidates.forEach((name, idx) => console.log(`  ${idx + 1}. ${name}`));
 }
 
 async function findCampaignTarget(page, keyword) {
   const normalizedKeyword = normalizeText(keyword);
   const regex = campaignPatternFromInput(keyword);
 
-  // 1) data-tooltip-content partial
   const tooltipMatch = page.locator('[data-tooltip-content]').filter({ hasText: regex }).first();
   if (await tooltipMatch.isVisible({ timeout: 5000 }).catch(() => false)) return tooltipMatch;
 
-  const tooltipAttrMatch = page.locator(`[data-tooltip-content*="${keyword}"]`).first();
-  if (await tooltipAttrMatch.isVisible({ timeout: 3000 }).catch(() => false)) return tooltipAttrMatch;
-
-  // 2) span._3dfi._3dfj partial
   const spanMatch = page.locator('span._3dfi._3dfj').filter({ hasText: regex }).first();
   if (await spanMatch.isVisible({ timeout: 5000 }).catch(() => false)) return spanMatch;
 
-  // 3) getByText fallback partial
   const textMatch = page.getByText(regex).first();
   if (await textMatch.isVisible({ timeout: 5000 }).catch(() => false)) return textMatch;
 
-  // 4) whitespace-insensitive row scan fallback
   const rows = page.getByRole('row');
   const rowCount = await rows.count();
   for (let i = 0; i < rowCount; i += 1) {
     const text = await rows.nth(i).innerText().catch(() => '');
-    if (normalizeText(text).includes(normalizedKeyword)) {
-      return rows.nth(i);
-    }
+    if (normalizeText(text).includes(normalizedKeyword)) return rows.nth(i);
   }
-
   return null;
 }
 
@@ -148,16 +130,12 @@ async function closeViewCreatePanelIfOpened(page) {
     .getByRole('button', { name: /닫기|close|취소/i })
     .or(page.locator('[aria-label="닫기"], [aria-label="Close"]').first());
 
-  if (await closeBtn.first().isVisible({ timeout: 3000 }).catch(() => false)) {
-    await closeBtn.first().click();
-  } else {
-    await page.keyboard.press('Escape').catch(() => {});
-  }
+  if (await closeBtn.first().isVisible({ timeout: 3000 }).catch(() => false)) await closeBtn.first().click();
+  else await page.keyboard.press('Escape').catch(() => {});
 
   await page.waitForTimeout(1000);
   return true;
 }
-
 
 async function clickLeftCreateButtonOnly(page) {
   const createCandidates = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g');
@@ -167,102 +145,76 @@ async function clickLeftCreateButtonOnly(page) {
     const candidate = createCandidates.nth(i);
     const text = (await candidate.innerText().catch(() => '')).trim();
     console.log('[DEBUG] create button text:', text);
-
-    if (!text) continue;
-    if (text.includes('보기 만들기')) continue;
+    if (!text || text.includes('보기 만들기')) continue;
     if (text === '만들기') {
       await candidate.click();
       return;
     }
   }
-
-  throw new Error('왼쪽 "+ 만들기" 버튼을 찾지 못했습니다. (보기 만들기 제외 조건)');
+  throw new Error('왼쪽 "+ 만들기" 버튼을 찾지 못했습니다.');
 }
 
 async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   await closeViewCreatePanelIfOpened(page);
-
-  const modalRoot = page
-    .locator('[role="dialog"]')
-    .filter({ has: page.getByText(/광고 세트|ad set/i) })
-    .first();
-
+  const modalRoot = page.locator('[role="dialog"]').filter({ has: page.getByText(/광고 세트|ad set/i) }).first();
   const modalVisible = await modalRoot.isVisible({ timeout: 5000 }).catch(() => false);
-  let nameInput;
 
-  if (modalVisible) {
-    nameInput = modalRoot
-      .getByPlaceholder(/광고 세트 이름 지정/i)
+  const nameInput = modalVisible
+    ? modalRoot.getByPlaceholder(/광고 세트 이름 지정/i)
       .or(modalRoot.getByPlaceholder(/광고 세트 이름|ad set name|이름/i))
-      .or(modalRoot.getByLabel(/광고 세트 이름 지정|광고 세트 이름|ad set name/i));
-  } else {
-    nameInput = page
-      .getByPlaceholder(/광고 세트 이름 지정/i)
-      .or(page.getByPlaceholder(/광고 세트 이름|ad set name|이름/i));
-  }
+      .or(modalRoot.getByLabel(/광고 세트 이름 지정|광고 세트 이름|ad set name/i))
+    : page.getByPlaceholder(/광고 세트 이름 지정/i).or(page.getByPlaceholder(/광고 세트 이름|ad set name|이름/i));
 
   await nameInput.first().waitFor({ timeout: 15000 });
-  await nameInput.first().click();
   await nameInput.first().fill(adsetName);
+  await closeViewCreatePanelIfOpened(page);
+}
+
+async function fillAdsetBudgetInModalOnly(page, budgetValue) {
+  await closeViewCreatePanelIfOpened(page);
+  const modalRoot = page.locator('[role="dialog"]').filter({ has: page.getByText(/광고 세트|ad set/i) }).first();
+  const modalVisible = await modalRoot.isVisible({ timeout: 3000 }).catch(() => false);
+
+  const budgetInput = modalVisible
+    ? modalRoot
+      .getByLabel(/일일 예산|예산|daily budget|budget/i)
+      .or(modalRoot.getByPlaceholder(/예산|budget/i))
+      .or(modalRoot.locator('input[type="text"]').filter({ hasNot: modalRoot.locator('[type="checkbox"], [role="switch"]') }).first())
+    : page.getByLabel(/일일 예산|예산|daily budget|budget/i).or(page.getByPlaceholder(/예산|budget/i));
+
+  if (await budgetInput.first().isVisible({ timeout: 5000 }).catch(() => false)) {
+    console.log(`[STEP] 예산 입력: ${budgetValue}`);
+    await budgetInput.first().click();
+    await budgetInput.first().fill(String(budgetValue));
+  } else {
+    console.log('[STEP] 예산 입력창 미감지 - 건너뜀');
+  }
 
   await closeViewCreatePanelIfOpened(page);
 }
 
-
-async function ensureQuickViewSaveSwitchEnabled(page) {
-  const switchLocator = page
-    .locator('input[type="checkbox"][role="switch"][aria-label*="빠른 보기" i], input[type="checkbox"][role="switch"][aria-label*="필터" i]')
-    .first();
-
-  const exists = await switchLocator.isVisible({ timeout: 2000 }).catch(() => false);
-  if (!exists) {
-    console.log('[STEP] 빠른 보기 저장 스위치 미감지 - 건너뜀');
-    return;
+async function enterAdsetFlow(page) {
+  const adsetOption = page
+    .getByRole('radio', { name: /광고 세트|ad set/i })
+    .or(page.getByRole('button', { name: /광고 세트|ad set/i }))
+    .or(page.getByText(/광고 세트|ad set/i));
+  if (await adsetOption.first().isVisible({ timeout: 5000 }).catch(() => false)) {
+    await adsetOption.first().click();
   }
-
-  const isChecked = await switchLocator.isChecked().catch(() => false);
-  if (!isChecked) {
-    console.log('[STEP] 빠른 보기 저장 스위치 OFF -> ON 전환 시도');
-    await switchLocator.check({ force: true }).catch(async () => {
-      await switchLocator.click({ force: true });
-    });
-  }
-
-  const finalChecked = await switchLocator.isChecked().catch(() => false);
-  console.log(`[DEBUG] 빠른 보기 저장 스위치 상태: ${finalChecked ? 'true' : 'false'}`);
 }
 
 async function attachMediaFromFolderIfConfigured(page) {
-  if (!MEDIA_FOLDER_PATH) {
-    console.log('[STEP] MEDIA_FOLDER_PATH 미설정 - 파일 선택 단계 건너뜀');
-    return;
-  }
-
-  console.log(`[STEP] 파일 폴더 지정 업로드 시도: ${MEDIA_FOLDER_PATH}`);
+  if (!MEDIA_FOLDER_PATH) return;
   const folderPath = path.resolve(MEDIA_FOLDER_PATH);
-  const folderEntries = await fs.readdir(folderPath, { withFileTypes: true });
-  const files = folderEntries
-    .filter((entry) => entry.isFile())
-    .map((entry) => path.join(folderPath, entry.name))
-    .filter((filePath) => /\.(png|jpe?g|webp|gif|mp4|mov)$/i.test(filePath));
+  const entries = await fs.readdir(folderPath, { withFileTypes: true });
+  const files = entries.filter((e) => e.isFile()).map((e) => path.join(folderPath, e.name)).filter((f) => /\.(png|jpe?g|webp|gif|mp4|mov)$/i.test(f));
+  if (!files.length) throw new Error(`MEDIA_FOLDER_PATH에 업로드 가능한 파일이 없습니다: ${folderPath}`);
 
-  if (files.length === 0) {
-    throw new Error(`MEDIA_FOLDER_PATH에 업로드 가능한 파일이 없습니다: ${folderPath}`);
-  }
-
-  const addMediaButton = page
-    .getByRole('button', { name: /미디어|이미지|동영상|add media|upload/i })
-    .or(page.getByText(/미디어|이미지|동영상|add media|upload/i).first());
-
-  if (await addMediaButton.first().isVisible({ timeout: 5000 }).catch(() => false)) {
-    await addMediaButton.first().click();
-  }
-
+  const addMediaButton = page.getByRole('button', { name: /미디어|이미지|동영상|add media|upload/i }).or(page.getByText(/미디어|이미지|동영상|add media|upload/i).first());
+  if (await addMediaButton.first().isVisible({ timeout: 5000 }).catch(() => false)) await addMediaButton.first().click();
   const fileInput = page.locator('input[type="file"]').first();
   await fileInput.waitFor({ timeout: 30000 });
   await fileInput.setInputFiles(files);
-
-  await page.screenshot({ path: path.join(DIRS.screenshots, '10-media-selected.png'), fullPage: true });
 }
 
 async function runFlow(page) {
@@ -272,18 +224,14 @@ async function runFlow(page) {
   await page.screenshot({ path: PATHS.step1, fullPage: true });
 
   console.log(`[STEP] 광고계정 이동: act=${AD_ACCOUNT_ID}`);
-  const targetUrl = `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${AD_ACCOUNT_ID}`;
-  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+  await page.goto(`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${AD_ACCOUNT_ID}`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(5000);
-
   console.log('[DEBUG] URL:', page.url());
   console.log('[DEBUG] TITLE:', await page.title());
-
   await page.screenshot({ path: PATHS.step2, fullPage: true });
 
   await trySearchBox(page, CAMPAIGN_NAME);
   const campaignTarget = await findCampaignTarget(page, CAMPAIGN_NAME);
-
   if (!campaignTarget) {
     await logCampaignCandidates(page, 10);
     throw new Error(`CAMPAIGN_NAME partial match 실패: ${CAMPAIGN_NAME}`);
@@ -291,27 +239,30 @@ async function runFlow(page) {
 
   await campaignTarget.click();
   await page.screenshot({ path: PATHS.step3, fullPage: true });
-
   await page.waitForLoadState('domcontentloaded');
   await page.screenshot({ path: PATHS.step4, fullPage: true });
 
-  await clickLeftCreateButtonOnly(page);
-  await page.screenshot({ path: PATHS.step5, fullPage: true });
+  for (let n = 0; n < ADSET_COUNT; n += 1) {
+    const index = ADSET_START_INDEX + n;
+    const adsetName = getAdsetName(index);
+    console.log(`[STEP] ${n + 1}/${ADSET_COUNT} 광고 세트 생성 시작: ${adsetName}`);
 
-  const adsetOption = page
-    .getByRole('radio', { name: /광고 세트|ad set/i })
-    .or(page.getByRole('button', { name: /광고 세트|ad set/i }))
-    .or(page.getByText(/광고 세트|ad set/i));
-  if (await adsetOption.first().isVisible({ timeout: 5000 }).catch(() => false)) {
-    await adsetOption.first().click();
+    await clickLeftCreateButtonOnly(page);
+    await page.screenshot({ path: PATHS.step5, fullPage: true });
+    await enterAdsetFlow(page);
+    await page.screenshot({ path: PATHS.step6, fullPage: true });
+
+    await fillAdsetNameInAdsetModalOnly(page, adsetName);
+    if (ADSET_DAILY_BUDGET) {
+      await fillAdsetBudgetInModalOnly(page, ADSET_DAILY_BUDGET);
+    }
+
+    if (n === 0) {
+      await attachMediaFromFolderIfConfigured(page);
+    }
   }
-  await page.screenshot({ path: PATHS.step6, fullPage: true });
 
-  await fillAdsetNameInAdsetModalOnly(page, getAdsetName());
-  await ensureQuickViewSaveSwitchEnabled(page);
   await page.screenshot({ path: PATHS.success, fullPage: true });
-
-  await attachMediaFromFolderIfConfigured(page);
 
   const activePanel = (await page.locator('[role="dialog"]').first().innerText().catch(() => '')).split('\n')[0] || '(unknown)';
   console.log('[DEBUG] FINAL URL:', page.url());
@@ -325,16 +276,12 @@ async function runFlow(page) {
 async function main() {
   validateEnv();
   await ensureDirs();
-
   console.log(`[OPEN] 기존 Chrome 세션에 CDP attach: ${CDP_URL}`);
   const browser = await chromium.connectOverCDP(CDP_URL);
 
   try {
     const context = browser.contexts()[0];
-    if (!context) {
-      throw new Error('연결된 Chrome context가 없습니다. Chrome을 remote-debugging 포트로 실행했는지 확인하세요.');
-    }
-
+    if (!context) throw new Error('연결된 Chrome context가 없습니다.');
     const page = context.pages()[0] ?? (await context.newPage());
     await runFlow(page);
   } catch (error) {
