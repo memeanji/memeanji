@@ -286,35 +286,94 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
 
   await pause(page, '광고 세트명 입력 후 대기', 2000);
 
-  const nextCandidates = page.locator('.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli');
-  const nextCount = await nextCandidates.count();
-  for (let i = 0; i < nextCount; i += 1) {
-    const c = nextCandidates.nth(i);
-    const text = (await c.innerText().catch(() => '')).trim();
-    const box = await c.boundingBox().catch(() => null);
-    console.log('[DEBUG] next button candidate:', { index: i, text, box });
-  }
-
-  const nextButton = nextCandidates
-    .filter({ hasText: /^계속$/ })
-    .first();
-
-  const visible = await nextButton.isVisible({ timeout: 15000 }).catch(() => false);
-  if (!visible) {
-    await debugDump(page, 'next button not found');
-    throw new Error('다음 단계 버튼을 찾지 못했습니다.');
-  }
-
-  await page.waitForTimeout(1000);
-  await nextButton.click({ timeout: 10000 }).catch(async () => {
-    await nextButton.click({ force: true });
-  }).catch(async () => {
-    const box = await nextButton.boundingBox();
-    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  });
-  await page.waitForTimeout(3000);
+  await updateDateAndTimeBeforeContinue(page);
+  await clickContinueButtonOnly(page);
   await page.screenshot({ path: path.join(DIRS.screenshots, '08-adset-name-and-continue.png'), fullPage: true });
 
+}
+
+
+async function updateDateAndTimeBeforeContinue(page) {
+  await pause(page, '날짜/시간 영역 이동 전 대기', 1500);
+  await page.mouse.wheel(0, 500);
+  await pause(page, '스크롤 후 날짜/시간 영역 대기', 1000);
+
+  const dateInput = page.locator('input[placeholder="yyyy-mm-dd"]').first();
+  const dateVisible = await dateInput.isVisible({ timeout: 15000 }).catch(() => false);
+
+  if (!dateVisible) {
+    console.log('[DEBUG] 날짜 input 미감지 - 날짜/시간 변경 건너뜀');
+    return;
+  }
+
+  const currentDateText = await dateInput.inputValue().catch(() => '');
+  console.log('[DEBUG] current date value:', currentDateText);
+
+  const match = currentDateText.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const nextDate = new Date(year, month - 1, day);
+    nextDate.setDate(nextDate.getDate() + 1);
+
+    const nextDateText = `${nextDate.getFullYear()}년 ${nextDate.getMonth() + 1}월 ${nextDate.getDate()}일`;
+    await dateInput.click();
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type(nextDateText, { delay: 50 });
+    await page.waitForTimeout(1000);
+    console.log('[DEBUG] updated date value:', await dateInput.inputValue().catch(() => ''));
+  } else {
+    console.log('[DEBUG] 날짜 파싱 실패, 기존 값 유지:', currentDateText);
+  }
+
+  const timeInputs = await page.locator('input').elementHandles();
+  for (const input of timeInputs) {
+    const value = await input.getAttribute('value');
+    const placeholder = await input.getAttribute('placeholder');
+    const ariaLabel = await input.getAttribute('aria-label');
+
+    console.log('[DEBUG] time input candidate:', { value, placeholder, ariaLabel });
+
+    if (
+      value?.includes(':') ||
+      placeholder?.includes('시간') ||
+      ariaLabel?.includes('시간')
+    ) {
+      await input.click();
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+      await page.keyboard.press('Backspace');
+      await page.keyboard.type('05:00', { delay: 50 });
+      await page.waitForTimeout(500);
+      break;
+    }
+  }
+}
+
+async function clickContinueButtonOnly(page) {
+  const continueCandidates = await page.locator('div, span, button').filter({ hasText: /^계속$/ }).elementHandles();
+
+  let continueButton = null;
+  for (const el of continueCandidates) {
+    const text = (await el.innerText().catch(() => '')).trim();
+    const box = await el.boundingBox();
+    console.log('[DEBUG] continue candidate:', { text, box });
+
+    if (text === '계속' && box && box.x > 1000 && box.y > 350) {
+      continueButton = el;
+      break;
+    }
+  }
+
+  if (!continueButton) {
+    throw new Error('계속 버튼을 찾지 못했습니다.');
+  }
+
+  const box = await continueButton.boundingBox();
+  if (!box) throw new Error('계속 버튼 좌표를 가져오지 못했습니다.');
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForTimeout(3000);
 }
 
 async function fillAdsetBudgetInModalOnly(page, budgetValue) {
