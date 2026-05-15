@@ -432,43 +432,42 @@ async function ensureCampaignStructureRoot(page) {
 }
 
 async function openDuplicateMenuViaIcons(page) {
-  console.log('[STEP] 복제 메뉴 사전 진입: 기본/더보기 토글 -> 이 광고에 대한 작업 -> 복제');
+  console.log('[STEP] 복제 메뉴 사전 진입: 기본/작업 메뉴 -> 복제');
 
   await ensureCampaignStructureRoot(page);
-  await pause(page, '더보기 토글 탐색 전 대기', 3000);
+  await pause(page, '더보기/작업 메뉴 탐색 전 대기', 3000);
 
-  const toggleButton = page
+  const primaryToggle = page
     .locator('div[role="button"][aria-busy="false"].x1i10hfl.xjqpnuy.xc5r6h4.xqeqjp1.x1phubyo')
     .filter({ has: page.locator('.xtwfq29') })
     .first();
 
+  const actionMenuToggle = page
+    .locator('div[role="button"][aria-busy="false"][data-surface*="ADGROUP"]')
+    .filter({ hasText: /작업 메뉴/ })
+    .first();
+
   let toggled = false;
-  for (let attempt = 1; attempt <= 8 && !toggled; attempt += 1) {
-    let target = toggleButton;
-    let visible = await target.isVisible({ timeout: 3000 }).catch(() => false);
+  for (let attempt = 1; attempt <= 10 && !toggled; attempt += 1) {
+    let target = primaryToggle;
+    let visible = await target.isVisible({ timeout: 2500 }).catch(() => false);
 
     if (!visible) {
-      const fallback = page.locator('div[role="button"][aria-busy="false"]').filter({ has: page.locator('.xtwfq29') }).first();
-      const fallbackVisible = await fallback.isVisible({ timeout: 1500 }).catch(() => false);
-      if (fallbackVisible) {
-        target = fallback;
+      const actionVisible = await actionMenuToggle.isVisible({ timeout: 1500 }).catch(() => false);
+      if (actionVisible) {
+        target = actionMenuToggle;
         visible = true;
       }
     }
 
-    const boxPreview = await target.boundingBox().catch(() => null);
-    console.log(`[DEBUG] toggle button visible attempt ${attempt}/8:`, { visible, box: boxPreview });
+    const box = await target.boundingBox().catch(() => null);
+    const text = (await target.innerText().catch(() => '')).trim();
+    console.log('[DEBUG] menu toggle candidate:', { attempt, visible, text, box });
 
     if (visible) {
       await target.click({ force: true }).catch(async () => {
-        const box = await target.boundingBox();
         if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       });
-
-      await toggleButton.evaluate((el) => {
-        el.setAttribute('aria-busy', 'true');
-      }).catch(() => {});
-
       toggled = true;
       break;
     }
@@ -477,7 +476,8 @@ async function openDuplicateMenuViaIcons(page) {
   }
 
   if (!toggled) {
-    throw new Error('기본/더보기 토글 버튼(aria-busy=false + .xtwfq29)을 찾지 못했습니다.');
+    await debugDump(page, 'menu toggle not found');
+    throw new Error('기본/작업 메뉴 토글 버튼을 찾지 못했습니다.');
   }
 
   await pause(page, '토글 클릭 후 메뉴 로딩 대기', 4000);
