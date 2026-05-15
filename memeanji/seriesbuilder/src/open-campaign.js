@@ -437,15 +437,20 @@ async function openDuplicateMenuViaIcons(page) {
   await ensureCampaignStructureRoot(page);
   await pause(page, '더보기/작업 메뉴 탐색 전 대기', 3000);
 
-  const primaryToggle = page
+  const baseContainer = page.locator('.x1lliihq').first();
+
+  const primaryToggle = baseContainer
     .locator('div[role="button"][aria-busy="false"].x1i10hfl.xjqpnuy.xc5r6h4.xqeqjp1.x1phubyo')
-    .filter({ has: page.locator('.xtwfq29') })
+    .filter({ has: baseContainer.locator('.xtwfq29') })
     .first();
 
   const actionMenuToggle = page
     .locator('div[role="button"][aria-busy="false"][data-surface*="ADGROUP"]')
     .filter({ hasText: /작업 메뉴/ })
     .first();
+
+  const baseVisible = await baseContainer.isVisible({ timeout: 5000 }).catch(() => false);
+  console.log('[DEBUG] .x1lliihq visible:', baseVisible);
 
   let toggled = false;
   for (let attempt = 1; attempt <= 10 && !toggled; attempt += 1) {
