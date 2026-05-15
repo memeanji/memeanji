@@ -8,6 +8,7 @@ const CAMPAIGN_NAME = process.env.CAMPAIGN_NAME;
 const ADSET_INDEX = process.env.ADSET_INDEX;
 const CHROME_USER_DATA_DIR = process.env.CHROME_USER_DATA_DIR;
 const CHROME_PROFILE_DIR = process.env.CHROME_PROFILE_DIR;
+const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
 
 const DIRS = {
   auth: path.resolve('auth'),
@@ -96,6 +97,46 @@ async function fillAdsetName(page, adsetName) {
   await page.screenshot({ path: PATHS.success, fullPage: true });
 }
 
+
+async function attachMediaFromFolderIfConfigured(page) {
+  if (!MEDIA_FOLDER_PATH) {
+    console.log('[STEP] MEDIA_FOLDER_PATH 미설정 - 파일 선택 단계 건너뜀');
+    return;
+  }
+
+  console.log(`[STEP] 파일 폴더 지정 업로드 시도: ${MEDIA_FOLDER_PATH}`);
+
+  const folderPath = path.resolve(MEDIA_FOLDER_PATH);
+  const folderEntries = await fs.readdir(folderPath, { withFileTypes: true });
+  const files = folderEntries
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(folderPath, entry.name))
+    .filter((filePath) => /\.(png|jpe?g|webp|gif|mp4|mov)$/i.test(filePath));
+
+  if (files.length === 0) {
+    throw new Error(`MEDIA_FOLDER_PATH에 업로드 가능한 파일이 없습니다: ${folderPath}`);
+  }
+
+  const addMediaButton = page
+    .getByRole('button', { name: /미디어|이미지|동영상|add media|upload/i })
+    .or(page.getByText(/미디어|이미지|동영상|add media|upload/i).first());
+
+  if (await addMediaButton.first().isVisible({ timeout: 5000 }).catch(() => false)) {
+    await addMediaButton.first().click();
+  }
+
+  const fileInput = page
+    .locator('input[type="file"]')
+    .filter({ hasNot: page.locator('[disabled]') })
+    .first();
+
+  await fileInput.waitFor({ timeout: 30000 });
+  await fileInput.setInputFiles(files);
+
+  console.log(`[STEP] 파일 선택 완료 (${files.length}개)`);
+  await page.screenshot({ path: path.join(DIRS.screenshots, '10-media-selected.png'), fullPage: true });
+}
+
 async function runFlow(page) {
   console.log('[STEP] Ads Manager 접속');
   await page.goto('https://adsmanager.facebook.com/adsmanager/manage/campaigns', { waitUntil: 'domcontentloaded' });
@@ -120,6 +161,7 @@ async function runFlow(page) {
   await clickCreateButton(page);
   await enterAdsetFlow(page);
   await fillAdsetName(page, getAdsetName());
+  await attachMediaFromFolderIfConfigured(page);
 
   console.log('[STEP] 최종 검수용 pause 진입 (게시 버튼 수동)');
   await page.pause();

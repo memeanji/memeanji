@@ -23,6 +23,7 @@ cp .env.example .env
 - `ADSET_INDEX`: 광고세트 번호 (이름 생성에 사용)
 - `CHROME_USER_DATA_DIR`: Chrome 사용자 데이터 루트 경로
 - `CHROME_PROFILE_DIR`: 사용할 프로필 디렉터리명 (`Default`, `Profile 1` 등)
+- `MEDIA_FOLDER_PATH` (선택): 광고 소재 파일이 있는 폴더 경로 (폴더 직접 지정 업로드)
 
 ## 3) Windows에서 Chrome 프로필 경로 확인
 
@@ -63,7 +64,8 @@ npm run open-campaign
 8. 광고세트 이름 자동 입력
    - 형식: `MMDD 리타겟 {번호}번 광고세트`
    - 예시: `0513 리타겟 1번 광고세트`
-9. `page.pause()`로 멈춤 (최종 검수 후 사용자가 직접 게시)
+9. (선택) `MEDIA_FOLDER_PATH`가 설정되어 있으면 해당 폴더의 파일을 자동 선택
+10. `page.pause()`로 멈춤 (최종 검수 후 사용자가 직접 게시)
 
 ## 스크린샷
 
@@ -78,6 +80,7 @@ npm run open-campaign
 - `07-create-button-clicked.png`
 - `08-adset-flow-opened.png`
 - `09-adset-name-filled.png`
+- `10-media-selected.png` (MEDIA_FOLDER_PATH 설정 시)
 
 에러 발생 시:
 - `screenshots/error.png`
