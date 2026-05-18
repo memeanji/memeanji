@@ -788,7 +788,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
 
   const today = getTodayMMDD();
   let adsetIndex = adsetStartIndex;
-  let adCreativeIndex = 2;
+  let adCreativeIndex = 1;
   const adsetEndIndex = adsetStartIndex + adsetCount - 1;
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
@@ -825,7 +825,6 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           await page.waitForTimeout(5000);
           console.log('[STEP] 광고세트명 변경:', { targetAdsetName });
           adsetIndex += 1;
-          adCreativeIndex = 2;
         }
         continue;
       }
