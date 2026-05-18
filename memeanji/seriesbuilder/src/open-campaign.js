@@ -746,9 +746,13 @@ async function fillAdsetBudgetInModalOnly(page, budgetValue) {
   const budgetInput = modalVisible
     ? modalRoot
       .getByLabel(/일일 예산|예산|daily budget|budget/i)
-      .or(modalRoot.getByPlaceholder(/예산|budget/i))
+      .or(modalRoot.getByPlaceholder(/예산|budget|금액을 입력하세요/i))
+      .or(modalRoot.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value*=","]'))
       .or(modalRoot.locator('input[type="text"]').filter({ hasNot: modalRoot.locator('[type="checkbox"], [role="switch"]') }).first())
-    : page.getByLabel(/일일 예산|예산|daily budget|budget/i).or(page.getByPlaceholder(/예산|budget/i));
+    : page
+      .getByLabel(/일일 예산|예산|daily budget|budget/i)
+      .or(page.getByPlaceholder(/예산|budget|금액을 입력하세요/i))
+      .or(page.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value*=","]'));
 
   const budgetEl = budgetInput.first();
   const budgetVisible = await budgetEl.isVisible({ timeout: 5000 }).catch(() => false);
@@ -1005,6 +1009,30 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
   }
 }
 
+
+async function enterCreativeInsideEditor(page) {
+  console.log('[STEP] 크리에이티브 내부 진입 시작 (xdj266r -> 수정 버튼)');
+
+  const gate = page.locator('div.xdj266r').first();
+  await gate.waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForTimeout(3000);
+
+  const modifyButton = page.locator('div[role="button"].xdj266r').filter({ hasText: /^수정$/ }).first();
+  const visible = await modifyButton.isVisible({ timeout: 15000 }).catch(() => false);
+  if (!visible) {
+    await debugDump(page, 'modify button not found for creative entry');
+    throw new Error('크리에이티브 수정 버튼을 찾지 못했습니다.');
+  }
+
+  await page.waitForTimeout(3000);
+  await modifyButton.click({ force: true }).catch(async () => {
+    const box = await modifyButton.boundingBox();
+    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  });
+  await page.waitForTimeout(5000);
+  console.log('[STEP] 크리에이티브 수정 버튼 클릭 완료');
+}
+
 async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCount = 10, adCreativeCount = 5) {
   console.log('[STEP] 광고세트/광고소재 순차 이름 변경 시작');
 
@@ -1030,7 +1058,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const rowBox = await row.boundingBox().catch(() => null);
       if (!rowBox) continue;
 
-      const isAdsetCopy = rowText.includes('광고세트') && rowText.includes('사본');
+      const isAdsetCopy = (rowText.includes('광고세트') && rowText.includes('사본')) || /리타겟\s*\d+번\s*광고세트/.test(rowText);
       const isAdCopy = rowText.includes('새 판매 광고') || rowText.includes('광고 - 사본') || rowText.includes('광고명');
 
       if (isAdsetCopy && adsetIndex <= adsetEndIndex) {
@@ -1069,6 +1097,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         console.log('[STEP] 광고소재명 변경:', { targetAdName });
         // await openCreativeSettingsAndFillLandingUrl(page, targetAdName);
         await fillLandingUrlOnly(page, targetAdName);
+        await enterCreativeInsideEditor(page);
 
         if (adCreativeIndex === 1 && !firstCreativeMediaUploaded) {
           await page.waitForTimeout(5000);
@@ -1080,6 +1109,13 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         adCreativeIndex += 1;
       }
     }
+
+    console.log('[DEBUG] 순차 변경 진행도:', {
+      adsetIndex,
+      adsetEndIndex,
+      adCreativeIndex,
+      maxCreativeTotal,
+    });
 
     if (adsetIndex > adsetEndIndex && adCreativeIndex > maxCreativeTotal) {
       console.log('[STEP] 광고세트/광고소재 순차 이름 변경 완료');
