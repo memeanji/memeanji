@@ -307,7 +307,7 @@ async function updateDateAndTimeBeforeContinue(page) {
   await pause(page, '스크롤 후 날짜/시간 영역 대기', 3000);
 
   let dateInput = null;
-  for (let attempt = 1; attempt <= 6; attempt += 1) {
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
     const candidate = page.locator('input[placeholder="yyyy-mm-dd"]').first();
     const visible = await candidate.isVisible({ timeout: 5000 }).catch(() => false);
     if (visible) {
@@ -445,8 +445,8 @@ async function openCorrectAdActionMenu(page) {
 
   let opened = false;
 
-  for (let attempt = 1; attempt <= 4 && !opened; attempt += 1) {
-    console.log(`[STEP] 작업 메뉴 탐색/클릭 시도 ${attempt}/4`);
+  for (let attempt = 1; attempt <= 10 && !opened; attempt += 1) {
+    console.log(`[STEP] 작업 메뉴 탐색/클릭 시도 ${attempt}/10`);
 
     const buttonCandidates = await page.locator(menuButtonSelector).elementHandles();
     let targetMenu = null;
@@ -486,14 +486,17 @@ async function openCorrectAdActionMenu(page) {
     await page.mouse.click(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2);
     await page.waitForTimeout(10000);
 
+    const actionHeading = page.locator('div[role="heading"]').filter({ hasText: /^이 광고 세트에 대한 작업$/ }).first();
+    const actionHeadingVisible = await actionHeading.isVisible({ timeout: 10000 }).catch(() => false);
     const duplicateByClass = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
     const duplicateVisible = await duplicateByClass.isVisible({ timeout: 10000 }).catch(() => false);
     const bodyText = await page.locator('body').innerText();
 
     console.log('[DEBUG] 작업 메뉴 클릭 후 body text:', bodyText.slice(0, 3000));
+    console.log('[DEBUG] 광고세트 작업 heading visible:', actionHeadingVisible);
     console.log('[DEBUG] 복제 버튼 visible:', duplicateVisible);
 
-    if (duplicateVisible || bodyText.includes('이 광고에 대한 작업') || bodyText.includes('복제')) {
+    if (actionHeadingVisible || duplicateVisible || bodyText.includes('이 광고 세트에 대한 작업') || bodyText.includes('복제')) {
       opened = true;
       break;
     }
@@ -509,14 +512,14 @@ async function openCorrectAdActionMenu(page) {
   console.log('[STEP] 작업 메뉴 열기 성공');
 }
 
-async function setDuplicateCount(page, count = 5) {
+async function setDuplicateCount(page, count = 9) {
   console.log('[STEP] 복제 옵션 버튼 탐색');
   await openCorrectAdActionMenu(page);
 
   const duplicateButton = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
 
   let duplicateClicked = false;
-  for (let attempt = 1; attempt <= 4 && !duplicateClicked; attempt += 1) {
+  for (let attempt = 1; attempt <= 10 && !duplicateClicked; attempt += 1) {
     await duplicateButton.waitFor({ state: 'visible', timeout: 30000 });
     await page.waitForTimeout(5000);
     await duplicateButton.click({ force: true }).catch(async () => {
@@ -532,7 +535,7 @@ async function setDuplicateCount(page, count = 5) {
       break;
     }
 
-    console.log(`[WARN] 복제 클릭 후 상태 변화 없음, 재시도 ${attempt}/4`);
+    console.log(`[WARN] 복제 클릭 후 상태 변화 없음, 재시도 ${attempt}/10`);
   }
 
   if (!duplicateClicked) {
@@ -544,8 +547,8 @@ async function setDuplicateCount(page, count = 5) {
 
   let duplicateInput = null;
 
-  for (let attempt = 1; attempt <= 5; attempt += 1) {
-    await pause(page, `복제 input 탐색 전 대기 ${attempt}/5`, 3000);
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    await pause(page, `복제 input 탐색 전 대기 ${attempt}/10`, 3000);
     const inputs = await page.locator('input').elementHandles();
 
     for (const input of inputs) {
@@ -572,7 +575,7 @@ async function setDuplicateCount(page, count = 5) {
 
     if (duplicateInput) break;
 
-    console.log(`[WAIT] 복제 개수 input 탐색 재시도 ${attempt}/5`);
+    console.log(`[WAIT] 복제 개수 input 탐색 재시도 ${attempt}/10`);
     await page.waitForTimeout(5000);
   }
 
@@ -628,7 +631,7 @@ async function confirmDuplicateModal(page) {
 
   const duplicateCreateButton = page.locator('#pe_duplicate_create_button').first();
 
-  for (let attempt = 1; attempt <= 6; attempt += 1) {
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
     const visible = await duplicateCreateButton.isVisible({ timeout: 3000 }).catch(() => false);
     const box = await duplicateCreateButton.boundingBox().catch(() => null);
 
@@ -643,13 +646,13 @@ async function confirmDuplicateModal(page) {
       return true;
     }
 
-    console.log(`[WAIT] 복제만들기 버튼 탐색 재시도 ${attempt}/6`);
+    console.log(`[WAIT] 복제만들기 버튼 탐색 재시도 ${attempt}/10`);
     await page.waitForTimeout(3000);
   }
 
   const confirmCandidates = page.locator('div, span, button').filter({ hasText: /^복제$/ });
 
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
     const count = await confirmCandidates.count();
 
     for (let i = 0; i < count; i += 1) {
@@ -671,7 +674,7 @@ async function confirmDuplicateModal(page) {
       return true;
     }
 
-    console.log(`[WAIT] 복제 confirm fallback 탐색 재시도 ${attempt}/4`);
+    console.log(`[WAIT] 복제 confirm fallback 탐색 재시도 ${attempt}/10`);
     await page.waitForTimeout(3000);
   }
 
@@ -812,7 +815,7 @@ async function runFlow(page) {
     }
 
     await pause(page, '스케줄링 후 복제 설정 전 대기', 5000);
-    await setDuplicateCount(page, 5);
+    await setDuplicateCount(page, 9);
     await pause(page, '복제 설정 후 대기', 7000);
 
     if (ADSET_DAILY_BUDGET) {
