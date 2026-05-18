@@ -488,7 +488,8 @@ async function openCorrectAdActionMenu(page, adsetName) {
       continue;
     }
 
-    console.log('[DEBUG] 최종 작업 메뉴 box:', menuBox);
+    const menuTypeLabel = adsetName === '새 판매 광고' ? '광고 복제 작업메뉴 찾기' : '광고 세트 작업메뉴 찾기';
+    console.log(`[DEBUG] ${menuTypeLabel}:`, menuBox);
     await page.waitForTimeout(5000);
     await page.mouse.click(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2);
     await page.waitForTimeout(10000);
@@ -818,16 +819,40 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
 
 async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
   const creativeSettings = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x1iyjqo2').filter({ hasText: /^크리에이티브 설정$/ }).first();
-  const creativeVisible = await creativeSettings.isVisible({ timeout: 8000 }).catch(() => false);
-  if (creativeVisible) {
+
+  let creativeOpened = false;
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    const creativeVisible = await creativeSettings.isVisible({ timeout: 10000 }).catch(() => false);
+    if (!creativeVisible) {
+      console.log(`[WAIT] 크리에이티브 설정 버튼 탐색 재시도 ${attempt}/10`);
+      await page.waitForTimeout(5000);
+      continue;
+    }
+
     await page.waitForTimeout(5000);
     await creativeSettings.click({ force: true }).catch(async () => {
       const box = await creativeSettings.boundingBox();
       if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
+    await page.waitForTimeout(7000);
+
+    const imageAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: /^이미지 광고$/ }).first();
+    const uploadButton = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli').filter({ hasText: /^업로드$/ }).first();
+    const openedByImage = await imageAdTab.isVisible({ timeout: 3000 }).catch(() => false);
+    const openedByUpload = await uploadButton.isVisible({ timeout: 3000 }).catch(() => false);
+
+    if (openedByImage || openedByUpload) {
+      creativeOpened = true;
+      console.log('[STEP] 크리에이티브 설정 진입 성공');
+      break;
+    }
+
+    console.log(`[WAIT] 크리에이티브 설정 진입 확인 재시도 ${attempt}/10`);
     await page.waitForTimeout(5000);
-  } else {
-    console.log('[STEP] 크리에이티브 설정 버튼 미감지 - 계속 진행');
+  }
+
+  if (!creativeOpened) {
+    console.log('[STEP] 크리에이티브 설정 진입 미확인 - 계속 진행');
   }
 
   const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${targetAdName}`;
