@@ -810,7 +810,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const rowBox = await row.boundingBox().catch(() => null);
       if (!rowBox) continue;
 
-      const isAdsetCopy = (rowText.includes('광고세트') && rowText.includes('사본')) || /리타겟\s*\d+번\s*광고세트/.test(rowText);
+      const isAdsetCopy = rowText.includes('광고세트') && rowText.includes('사본');
       const isAdCopy = rowText.includes('새 판매 광고') || rowText.includes('광고 - 사본') || rowText.includes('광고명');
 
       if (isAdsetCopy && adsetIndex <= adsetEndIndex) {
@@ -818,7 +818,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         await page.waitForTimeout(7000);
 
         const targetAdsetName = getAdsetName(adsetIndex);
-        const adsetInput = page.locator('input[placeholder="여기에 광고 세트 이름을 입력하세요..."], input[placeholder="광고 세트 이름 지정"], input[value*="광고세트"], input[value*="리타겟"]').first();
+        const adsetInput = page.locator('input[placeholder="여기에 광고 세트 이름을 입력하세요..."], input[placeholder="광고 세트 이름 지정"]').first();
         const visible = await adsetInput.isVisible({ timeout: 5000 }).catch(() => false);
         if (visible) {
           await adsetInput.click({ force: true });
@@ -828,8 +828,6 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           await page.waitForTimeout(5000);
           console.log('[STEP] 광고세트명 변경:', { targetAdsetName });
           adsetIndex += 1;
-        } else {
-          console.log('[WARN] 광고세트명 input 미감지 - 변경 스킵', { rowText });
         }
         continue;
       }
@@ -849,21 +847,6 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         await page.keyboard.type(targetAdName, { delay: 60 });
         await page.waitForTimeout(5000);
         console.log('[STEP] 광고소재명 변경:', { targetAdName });
-
-        const websiteUrlInput = page.locator('input[placeholder="http://www.example.com/page"], input[placeholder*="example.com/page"]').first();
-        const websiteUrlVisible = await websiteUrlInput.isVisible({ timeout: 5000 }).catch(() => false);
-        if (websiteUrlVisible) {
-          const targetWebsiteUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${targetAdName}`;
-          await websiteUrlInput.click({ force: true });
-          await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-          await page.keyboard.press('Backspace');
-          await page.keyboard.type(targetWebsiteUrl, { delay: 40 });
-          await page.waitForTimeout(3000);
-          console.log('[STEP] 광고소재 URL 변경:', { targetWebsiteUrl });
-        } else {
-          console.log('[STEP] 광고소재 URL input 미감지 - 건너뜀');
-        }
-
         adCreativeIndex += 1;
       }
     }
