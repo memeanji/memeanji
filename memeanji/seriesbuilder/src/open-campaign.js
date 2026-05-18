@@ -426,7 +426,7 @@ async function ensureCampaignStructureRoot(page) {
 }
 
 async function openCorrectAdActionMenu(page, adsetName) {
-  console.log('[STEP] 새 판매 광고 row 기준 작업 메뉴 탐색');
+  console.log('[STEP] row 기준 작업 메뉴 탐색');
 
   await ensureCampaignStructureRoot(page);
   await page.waitForTimeout(5000);
@@ -489,7 +489,7 @@ async function openCorrectAdActionMenu(page, adsetName) {
     await page.mouse.click(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2);
     await page.waitForTimeout(10000);
 
-    const actionHeading = page.locator('div[role="heading"]').filter({ hasText: /^이 광고 세트에 대한 작업$/ }).first();
+    const actionHeading = page.locator('div[role="heading"]').filter({ hasText: /이 광고( 세트)?에 대한 작업/ }).first();
     const actionHeadingVisible = await actionHeading.isVisible({ timeout: 10000 }).catch(() => false);
     const duplicateByClass = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
     const duplicateVisible = await duplicateByClass.isVisible({ timeout: 10000 }).catch(() => false);
@@ -499,7 +499,7 @@ async function openCorrectAdActionMenu(page, adsetName) {
     console.log('[DEBUG] 광고세트 작업 heading visible:', actionHeadingVisible);
     console.log('[DEBUG] 복제 버튼 visible:', duplicateVisible);
 
-    if (actionHeadingVisible || duplicateVisible || bodyText.includes('이 광고 세트에 대한 작업') || bodyText.includes('복제')) {
+    if (actionHeadingVisible || duplicateVisible || bodyText.includes('이 광고 세트에 대한 작업') || bodyText.includes('이 광고에 대한 작업') || bodyText.includes('복제')) {
       opened = true;
       break;
     }
@@ -516,7 +516,7 @@ async function openCorrectAdActionMenu(page, adsetName) {
 }
 
 async function setDuplicateCount(page, count = 9, adsetName) {
-  console.log('[STEP] 복제 옵션 버튼 탐색');
+  console.log('[STEP] 복제 옵션 버튼 탐색:', { adsetName, count });
   await openCorrectAdActionMenu(page, adsetName);
 
   const duplicateButton = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
@@ -743,10 +743,19 @@ async function fillAdsetBudgetInModalOnly(page, budgetValue) {
       .or(modalRoot.locator('input[type="text"]').filter({ hasNot: modalRoot.locator('[type="checkbox"], [role="switch"]') }).first())
     : page.getByLabel(/일일 예산|예산|daily budget|budget/i).or(page.getByPlaceholder(/예산|budget/i));
 
-  if (await budgetInput.first().isVisible({ timeout: 5000 }).catch(() => false)) {
+  const budgetEl = budgetInput.first();
+  const budgetVisible = await budgetEl.isVisible({ timeout: 5000 }).catch(() => false);
+
+  if (budgetVisible) {
+    const disabled = await budgetEl.getAttribute('aria-disabled').catch(() => null);
+    if (disabled === 'true') {
+      console.log('[STEP] 예산 입력창 비활성(aria-disabled=true) - 건너뜀');
+      return;
+    }
+
     console.log(`[STEP] 예산 입력: ${budgetValue}`);
-    await budgetInput.first().click();
-    await budgetInput.first().fill(String(budgetValue));
+    await budgetEl.click({ force: true }).catch(() => null);
+    await budgetEl.fill(String(budgetValue)).catch(() => null);
   } else {
     console.log('[STEP] 예산 입력창 미감지 - 건너뜀');
   }
@@ -817,9 +826,13 @@ async function runFlow(page) {
       throw new Error('스케줄링 영역 확인 실패: 날짜 input을 찾지 못했습니다.');
     }
 
-    await pause(page, '스케줄링 후 복제 설정 전 대기', 5000);
+    await pause(page, '스케줄링 후 새 판매 광고 복제 설정 전 대기', 5000);
+    await setDuplicateCount(page, 4, '새 판매 광고');
+    await pause(page, '새 판매 광고 복제 설정 후 대기', 7000);
+
+    await pause(page, '스케줄링 후 광고세트 복제 설정 전 대기', 5000);
     await setDuplicateCount(page, 9, adsetName);
-    await pause(page, '복제 설정 후 대기', 7000);
+    await pause(page, '광고세트 복제 설정 후 대기', 7000);
 
     if (ADSET_DAILY_BUDGET) {
       await fillAdsetBudgetInModalOnly(page, ADSET_DAILY_BUDGET);
