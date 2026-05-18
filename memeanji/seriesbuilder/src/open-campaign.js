@@ -438,77 +438,77 @@ async function openCorrectAdActionMenu(page) {
   await page.waitForTimeout(5000);
 
   const adRow = page.locator('text=새 판매 광고').first();
-
-  await adRow.waitFor({
-    state: 'visible',
-    timeout: 30000,
-  });
-
+  await adRow.waitFor({ state: 'visible', timeout: 30000 });
   await page.waitForTimeout(5000);
 
   const adRowBox = await adRow.boundingBox();
-
-  if (!adRowBox) {
-    throw new Error('새 판매 광고 row 위치를 찾지 못했습니다.');
-  }
+  if (!adRowBox) throw new Error('새 판매 광고 row 위치를 찾지 못했습니다.');
 
   console.log('[DEBUG] 새 판매 광고 row box:', adRowBox);
 
-  const menuCandidates = await page.locator(
-    '.x6s0dn4.x78zum5.x1q0g3np.xozqiw3.x2lwn1j.xeuugli.x1iyjqo2.x8va1my.x1hc1fzr.x13dflua.x6o7n8i.xxziih7.x12w9bfk.xl56j7k.xh8yej3'
-  ).elementHandles();
+  const menuButtonSelector = '[role="button"].x1i10hfl.xjqpnuy.xc5r6h4.xqeqjp1.x1phubyo.x972fbf';
+  const menuIconSelector = '.x6s0dn4.x78zum5.x1q0g3np.xozqiw3.x2lwn1j.xeuugli.x1iyjqo2.x8va1my.x1hc1fzr.x13dflua.x6o7n8i.xxziih7.x12w9bfk.xl56j7k.xh8yej3';
 
-  let targetMenu = null;
+  let opened = false;
 
-  for (const candidate of menuCandidates) {
-    const box = await candidate.boundingBox();
+  for (let attempt = 1; attempt <= 4 && !opened; attempt += 1) {
+    console.log(`[STEP] 작업 메뉴 탐색/클릭 시도 ${attempt}/4`);
 
-    if (!box) continue;
+    const buttonCandidates = await page.locator(menuButtonSelector).elementHandles();
+    let targetMenu = null;
 
-    const sameRow = Math.abs((box.y + box.height / 2) - (adRowBox.y + adRowBox.height / 2)) < 15;
-    const rightSide = box.x > adRowBox.x;
+    for (const candidate of buttonCandidates) {
+      const hasIcon = await candidate.$(menuIconSelector);
+      if (!hasIcon) continue;
 
-    console.log('[DEBUG] 작업 메뉴 candidate:', { box, sameRow, rightSide });
+      const box = await candidate.boundingBox();
+      if (!box) continue;
 
-    if (sameRow && rightSide) {
-      targetMenu = candidate;
+      const sameRow = Math.abs((box.y + box.height / 2) - (adRowBox.y + adRowBox.height / 2)) < 15;
+      const rightSide = box.x > adRowBox.x;
+
+      console.log('[DEBUG] 작업 메뉴 candidate:', { box, sameRow, rightSide });
+
+      if (sameRow && rightSide) {
+        targetMenu = candidate;
+        break;
+      }
+    }
+
+    if (!targetMenu) {
+      console.log('[WARN] 같은 row의 작업 메뉴 후보를 찾지 못함');
+      await page.waitForTimeout(5000);
+      continue;
+    }
+
+    const menuBox = await targetMenu.boundingBox();
+    if (!menuBox) {
+      await page.waitForTimeout(5000);
+      continue;
+    }
+
+    console.log('[DEBUG] 최종 작업 메뉴 box:', menuBox);
+    await page.waitForTimeout(5000);
+    await page.mouse.click(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2);
+    await page.waitForTimeout(10000);
+
+    const duplicateByClass = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
+    const duplicateVisible = await duplicateByClass.isVisible({ timeout: 10000 }).catch(() => false);
+    const bodyText = await page.locator('body').innerText();
+
+    console.log('[DEBUG] 작업 메뉴 클릭 후 body text:', bodyText.slice(0, 3000));
+    console.log('[DEBUG] 복제 버튼 visible:', duplicateVisible);
+
+    if (duplicateVisible || bodyText.includes('이 광고에 대한 작업') || bodyText.includes('복제')) {
+      opened = true;
       break;
     }
+
+    await page.waitForTimeout(5000);
   }
 
-  if (!targetMenu) {
-    await page.screenshot({
-      path: path.join(DIRS.screenshots, 'ad-row-menu-not-found.png'),
-      fullPage: true,
-    });
-
-    throw new Error('새 판매 광고 row의 작업 메뉴를 찾지 못했습니다.');
-  }
-
-  const menuBox = await targetMenu.boundingBox();
-
-  if (!menuBox) {
-    throw new Error('새 판매 광고 row의 작업 메뉴 좌표를 찾지 못했습니다.');
-  }
-
-  console.log('[DEBUG] 최종 작업 메뉴 box:', menuBox);
-
-  await page.waitForTimeout(5000);
-  await page.mouse.click(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2);
-  await page.waitForTimeout(7000);
-
-  const bodyText = await page.locator('body').innerText();
-
-  console.log('[DEBUG] 작업 메뉴 클릭 후 body text:', bodyText.slice(0, 3000));
-
-  const duplicateByClass = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
-  const duplicateVisible = await duplicateByClass.isVisible({ timeout: 5000 }).catch(() => false);
-
-  if (!bodyText.includes('이 광고에 대한 작업') && !bodyText.includes('복제') && !duplicateVisible) {
-    await page.screenshot({
-      path: path.join(DIRS.screenshots, 'duplicate-menu-not-opened.png'),
-      fullPage: true,
-    });
+  if (!opened) {
+    await page.screenshot({ path: path.join(DIRS.screenshots, 'duplicate-menu-not-opened.png'), fullPage: true });
     throw new Error('작업 메뉴는 클릭했지만 복제 메뉴가 열리지 않았습니다.');
   }
 
@@ -521,14 +521,30 @@ async function setDuplicateCount(page, count = 5) {
 
   const duplicateButton = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
 
-  await duplicateButton.waitFor({
-    state: 'visible',
-    timeout: 30000,
-  });
+  let duplicateClicked = false;
+  for (let attempt = 1; attempt <= 4 && !duplicateClicked; attempt += 1) {
+    await duplicateButton.waitFor({ state: 'visible', timeout: 30000 });
+    await page.waitForTimeout(5000);
+    await duplicateButton.click({ force: true }).catch(async () => {
+      const box = await duplicateButton.boundingBox();
+      if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    });
+    await page.waitForTimeout(10000);
 
-  await page.waitForTimeout(5000);
-  await duplicateButton.click({ force: true });
-  await page.waitForTimeout(7000);
+    const bodyText = await page.locator('body').innerText();
+    const duplicateStillVisible = await duplicateButton.isVisible({ timeout: 2000 }).catch(() => false);
+    if (!duplicateStillVisible || bodyText.includes('복제 개수') || bodyText.includes('계속')) {
+      duplicateClicked = true;
+      break;
+    }
+
+    console.log(`[WARN] 복제 클릭 후 상태 변화 없음, 재시도 ${attempt}/4`);
+  }
+
+  if (!duplicateClicked) {
+    await page.screenshot({ path: path.join(DIRS.screenshots, 'duplicate-button-click-failed.png'), fullPage: true });
+    throw new Error('복제 버튼 클릭에 실패했습니다.');
+  }
 
   console.log('[STEP] 복제 개수 input 탐색');
 
