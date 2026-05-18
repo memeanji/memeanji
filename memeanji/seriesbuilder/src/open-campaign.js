@@ -881,6 +881,22 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
 }
 
 
+
+async function fillLandingUrlOnly(page, targetAdName) {
+  const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${targetAdName}`;
+  const landingInput = page.locator('input[placeholder="http://www.example.com/page"]').first();
+  const landingVisible = await landingInput.isVisible({ timeout: 10000 }).catch(() => false);
+  if (!landingVisible) throw new Error('랜딩 URL input을 찾지 못했습니다.');
+
+  console.log('[STEP] 랜딩 URL 입력 시작(크리에이티브 설정 단계 주석 처리 모드)');
+  await landingInput.click({ force: true });
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type(targetUrl, { delay: 40 });
+  await page.waitForTimeout(3000);
+  console.log('[STEP] 랜딩 URL 입력 완료:', { targetUrl });
+}
+
 async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
   const creativeSettings = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x1iyjqo2').filter({ hasText: /^크리에이티브 설정$/ }).first();
   const imageAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: /^이미지 광고$/ }).first();
@@ -1029,7 +1045,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         await page.keyboard.type(targetAdName, { delay: 60 });
         await page.waitForTimeout(5000);
         console.log('[STEP] 광고소재명 변경:', { targetAdName });
-        await openCreativeSettingsAndFillLandingUrl(page, targetAdName);
+        // await openCreativeSettingsAndFillLandingUrl(page, targetAdName);
+        await fillLandingUrlOnly(page, targetAdName);
 
         if (adCreativeIndex === 1 && !firstCreativeMediaUploaded) {
           await page.waitForTimeout(5000);
