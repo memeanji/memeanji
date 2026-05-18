@@ -425,20 +425,23 @@ async function ensureCampaignStructureRoot(page) {
   throw new Error('id="campaign_structure_tree_root"를 찾지 못했습니다.');
 }
 
-async function openCorrectAdActionMenu(page) {
+async function openCorrectAdActionMenu(page, adsetName) {
   console.log('[STEP] 새 판매 광고 row 기준 작업 메뉴 탐색');
 
   await ensureCampaignStructureRoot(page);
   await page.waitForTimeout(5000);
 
-  const adRow = page.locator('text=새 판매 광고').first();
-  await adRow.waitFor({ state: 'visible', timeout: 30000 });
+  const adRow = page.locator(`text=${adsetName}`).first();
+  const adRowVisible = await adRow.isVisible({ timeout: 30000 }).catch(() => false);
+  if (!adRowVisible) {
+    throw new Error(`광고세트 row를 찾지 못했습니다: ${adsetName}`);
+  }
   await page.waitForTimeout(5000);
 
   const adRowBox = await adRow.boundingBox();
-  if (!adRowBox) throw new Error('새 판매 광고 row 위치를 찾지 못했습니다.');
+  if (!adRowBox) throw new Error(`광고세트 row 위치를 찾지 못했습니다: ${adsetName}`);
 
-  console.log('[DEBUG] 새 판매 광고 row box:', adRowBox);
+  console.log('[DEBUG] 광고세트 row box:', { adsetName, adRowBox });
 
   const menuButtonSelector = '[role="button"].x1i10hfl.xjqpnuy.xc5r6h4.xqeqjp1.x1phubyo.x972fbf';
   const menuIconSelector = '.x6s0dn4.x78zum5.x1q0g3np.xozqiw3.x2lwn1j.xeuugli.x1iyjqo2.x8va1my.x1hc1fzr.x13dflua.x6o7n8i.xxziih7.x12w9bfk.xl56j7k.xh8yej3';
@@ -512,9 +515,9 @@ async function openCorrectAdActionMenu(page) {
   console.log('[STEP] 작업 메뉴 열기 성공');
 }
 
-async function setDuplicateCount(page, count = 9) {
+async function setDuplicateCount(page, count = 9, adsetName) {
   console.log('[STEP] 복제 옵션 버튼 탐색');
-  await openCorrectAdActionMenu(page);
+  await openCorrectAdActionMenu(page, adsetName);
 
   const duplicateButton = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
 
@@ -815,7 +818,7 @@ async function runFlow(page) {
     }
 
     await pause(page, '스케줄링 후 복제 설정 전 대기', 5000);
-    await setDuplicateCount(page, 9);
+    await setDuplicateCount(page, 9, adsetName);
     await pause(page, '복제 설정 후 대기', 7000);
 
     if (ADSET_DAILY_BUDGET) {
