@@ -14,6 +14,8 @@ const ADSET_DAILY_BUDGET = process.env.ADSET_DAILY_BUDGET;
 const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
 const SCHEDULE_TIME = process.env.SCHEDULE_TIME || '05:00';
 const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
+const QUICK_TEST_CREATIVE_STEP = String(process.env.QUICK_TEST_CREATIVE_STEP || '').toLowerCase() === 'true';
+const QUICK_TEST_AD_NAME = process.env.QUICK_TEST_AD_NAME || `f_i_o_l_${new Date().getMonth() + 1}${new Date().getDate()}_1`;
 
 let firstCreativeMediaUploaded = false;
 
@@ -1006,7 +1008,23 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
   throw new Error('광고세트/광고소재 순차 이름 변경 실패');
 }
 
+
+async function runCreativeStepOnly(page) {
+  console.log('[STEP] QUICK_TEST_CREATIVE_STEP=true - 크리에이티브 단계만 실행');
+  await openCreativeSettingsAndFillLandingUrl(page, QUICK_TEST_AD_NAME);
+  if (!firstCreativeMediaUploaded) {
+    await attachMediaFromFolderIfConfigured(page, QUICK_TEST_AD_NAME);
+    firstCreativeMediaUploaded = true;
+  }
+  await page.screenshot({ path: path.join(DIRS.screenshots, 'quick-creative-step-done.png'), fullPage: true });
+}
+
 async function runFlow(page) {
+  if (QUICK_TEST_CREATIVE_STEP) {
+    await runCreativeStepOnly(page);
+    return;
+  }
+
   console.log('[STEP] Ads Manager 접속');
   await page.goto('https://adsmanager.facebook.com/adsmanager/manage/campaigns', { waitUntil: 'domcontentloaded' });
   await ensureLoggedInOrThrow(page);
