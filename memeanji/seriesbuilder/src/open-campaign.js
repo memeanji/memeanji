@@ -1009,6 +1009,30 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
   }
 }
 
+
+async function enterCreativeInsideEditor(page) {
+  console.log('[STEP] 크리에이티브 내부 진입 시작 (xdj266r -> 수정 버튼)');
+
+  const gate = page.locator('div.xdj266r').first();
+  await gate.waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForTimeout(3000);
+
+  const modifyButton = page.locator('div[role="button"].xdj266r').filter({ hasText: /^수정$/ }).first();
+  const visible = await modifyButton.isVisible({ timeout: 15000 }).catch(() => false);
+  if (!visible) {
+    await debugDump(page, 'modify button not found for creative entry');
+    throw new Error('크리에이티브 수정 버튼을 찾지 못했습니다.');
+  }
+
+  await page.waitForTimeout(3000);
+  await modifyButton.click({ force: true }).catch(async () => {
+    const box = await modifyButton.boundingBox();
+    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  });
+  await page.waitForTimeout(5000);
+  console.log('[STEP] 크리에이티브 수정 버튼 클릭 완료');
+}
+
 async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCount = 10, adCreativeCount = 5) {
   console.log('[STEP] 광고세트/광고소재 순차 이름 변경 시작');
 
@@ -1073,6 +1097,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         console.log('[STEP] 광고소재명 변경:', { targetAdName });
         // await openCreativeSettingsAndFillLandingUrl(page, targetAdName);
         await fillLandingUrlOnly(page, targetAdName);
+        await enterCreativeInsideEditor(page);
 
         if (adCreativeIndex === 1 && !firstCreativeMediaUploaded) {
           await page.waitForTimeout(5000);
