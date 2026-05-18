@@ -501,7 +501,14 @@ async function openCorrectAdActionMenu(page) {
 
   console.log('[DEBUG] 작업 메뉴 클릭 후 body text:', bodyText.slice(0, 3000));
 
-  if (!bodyText.includes('이 광고에 대한 작업') && !bodyText.includes('복제')) {
+  const duplicateByClass = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
+  const duplicateVisible = await duplicateByClass.isVisible({ timeout: 5000 }).catch(() => false);
+
+  if (!bodyText.includes('이 광고에 대한 작업') && !bodyText.includes('복제') && !duplicateVisible) {
+    await page.screenshot({
+      path: path.join(DIRS.screenshots, 'duplicate-menu-not-opened.png'),
+      fullPage: true,
+    });
     throw new Error('작업 메뉴는 클릭했지만 복제 메뉴가 열리지 않았습니다.');
   }
 
@@ -512,9 +519,7 @@ async function setDuplicateCount(page, count = 5) {
   console.log('[STEP] 복제 옵션 버튼 탐색');
   await openCorrectAdActionMenu(page);
 
-  const duplicateButton = page.locator('div, span, button')
-    .filter({ hasText: /^복제$/ })
-    .first();
+  const duplicateButton = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
 
   await duplicateButton.waitFor({
     state: 'visible',
