@@ -837,9 +837,12 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
 
 async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
   const creativeSettings = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x1iyjqo2').filter({ hasText: /^크리에이티브 설정$/ }).first();
+  const imageAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: /^이미지 광고$/ }).first();
+  const uploadButton = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli').filter({ hasText: /^업로드$/ }).first();
 
   let creativeOpened = false;
   for (let attempt = 1; attempt <= 10; attempt += 1) {
+    console.log(`[STEP] 크리에이티브 설정 진입 시도 ${attempt}/10`);
     const creativeVisible = await creativeSettings.isVisible({ timeout: 10000 }).catch(() => false);
     if (!creativeVisible) {
       console.log(`[WAIT] 크리에이티브 설정 버튼 탐색 재시도 ${attempt}/10`);
@@ -854,12 +857,11 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
     });
     await page.waitForTimeout(7000);
 
-    const imageAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: /^이미지 광고$/ }).first();
-    const uploadButton = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli').filter({ hasText: /^업로드$/ }).first();
-    const openedByImage = await imageAdTab.isVisible({ timeout: 3000 }).catch(() => false);
-    const openedByUpload = await uploadButton.isVisible({ timeout: 3000 }).catch(() => false);
+    const openedByImage = await imageAdTab.isVisible({ timeout: 5000 }).catch(() => false);
+    const openedByUpload = await uploadButton.isVisible({ timeout: 5000 }).catch(() => false);
+    console.log('[DEBUG] 크리에이티브 설정 진입 판정:', { openedByImage, openedByUpload });
 
-    if (openedByImage || openedByUpload) {
+    if (openedByImage && openedByUpload) {
       creativeOpened = true;
       console.log('[STEP] 크리에이티브 설정 진입 성공');
       break;
@@ -870,21 +872,23 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
   }
 
   if (!creativeOpened) {
-    console.log('[STEP] 크리에이티브 설정 진입 미확인 - 계속 진행');
+    await debugDump(page, 'creative settings not opened after retries');
+    throw new Error('크리에이티브 설정 진입 실패: 이미지 광고/업로드 확인 불가');
   }
 
   const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${targetAdName}`;
   const landingInput = page.locator('input[placeholder="http://www.example.com/page"]').first();
   const landingVisible = await landingInput.isVisible({ timeout: 10000 }).catch(() => false);
   if (landingVisible) {
+    console.log('[STEP] 랜딩 URL 입력 시작');
     await landingInput.click({ force: true });
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
     await page.keyboard.press('Backspace');
     await page.keyboard.type(targetUrl, { delay: 40 });
     await page.waitForTimeout(3000);
-    console.log('[STEP] 랜딩 URL 입력:', { targetUrl });
+    console.log('[STEP] 랜딩 URL 입력 완료:', { targetUrl });
   } else {
-    console.log('[STEP] 랜딩 URL input 미감지 - 건너뜀');
+    throw new Error('랜딩 URL input을 찾지 못했습니다.');
   }
 }
 
