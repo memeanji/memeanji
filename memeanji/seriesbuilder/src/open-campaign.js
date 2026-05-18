@@ -9,6 +9,7 @@ const ADSET_INDEX = process.env.ADSET_INDEX;
 const ADSET_BASE_NAME = '리타겟';
 const ADSET_START_INDEX = Number(process.env.ADSET_START_INDEX || ADSET_INDEX || 1);
 const ADSET_COUNT = Number(process.env.ADSET_COUNT || 1);
+const AD_CREATIVE_COUNT = Number(process.env.AD_CREATIVE_COUNT || process.env.ADVERTISE_COUNT || 5);
 const ADSET_DAILY_BUDGET = process.env.ADSET_DAILY_BUDGET;
 const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
 const SCHEDULE_TIME = process.env.SCHEDULE_TIME || '05:00';
@@ -34,6 +35,7 @@ function validateEnv() {
   if (!CAMPAIGN_NAME) throw new Error('CAMPAIGN_NAME is missing in .env');
   if (!Number.isFinite(ADSET_START_INDEX)) throw new Error('ADSET_START_INDEX must be a number');
   if (!Number.isFinite(ADSET_COUNT) || ADSET_COUNT < 1) throw new Error('ADSET_COUNT must be >= 1');
+  if (!Number.isFinite(AD_CREATIVE_COUNT) || AD_CREATIVE_COUNT < 1) throw new Error('AD_CREATIVE_COUNT must be >= 1');
 }
 
 function normalizeText(value) {
@@ -783,13 +785,14 @@ async function attachMediaFromFolderIfConfigured(page) {
 }
 
 
-async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCount = 10) {
+async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCount = 10, adCreativeCount = 5) {
   console.log('[STEP] 광고세트/광고소재 순차 이름 변경 시작');
 
   const today = getTodayMMDD();
   let adsetIndex = adsetStartIndex;
   let adCreativeIndex = 1;
   const adsetEndIndex = adsetStartIndex + adsetCount - 1;
+  const maxCreativeTotal = adsetCount * adCreativeCount;
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     await page.waitForTimeout(5000);
@@ -829,7 +832,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         continue;
       }
 
-      if (isAdCopy) {
+      if (isAdCopy && adCreativeIndex <= maxCreativeTotal) {
         await page.mouse.click(rowBox.x + rowBox.width / 2, rowBox.y + rowBox.height / 2);
         await page.waitForTimeout(7000);
 
@@ -848,7 +851,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       }
     }
 
-    if (adsetIndex > adsetEndIndex) {
+    if (adsetIndex > adsetEndIndex && adCreativeIndex > maxCreativeTotal) {
       console.log('[STEP] 광고세트/광고소재 순차 이름 변경 완료');
       return true;
     }
@@ -906,16 +909,22 @@ async function runFlow(page) {
       throw new Error('스케줄링 영역 확인 실패: 날짜 input을 찾지 못했습니다.');
     }
 
-    await pause(page, '스케줄링 후 새 판매 광고 복제 설정 전 대기', 5000);
-    await setDuplicateCount(page, 4, '새 판매 광고');
-    await pause(page, '새 판매 광고 복제 설정 후 대기', 7000);
+    const adCreativeDuplicateCount = Math.max(AD_CREATIVE_COUNT - 1, 0);
+    if (adCreativeDuplicateCount > 0) {
+      await pause(page, '스케줄링 후 새 판매 광고 복제 설정 전 대기', 5000);
+      await setDuplicateCount(page, adCreativeDuplicateCount, '새 판매 광고');
+      await pause(page, '새 판매 광고 복제 설정 후 대기', 7000);
+    }
 
-    await pause(page, '스케줄링 후 광고세트 복제 설정 전 대기', 5000);
-    await setDuplicateCount(page, 9, adsetName);
-    await pause(page, '광고세트 복제 설정 후 대기', 7000);
+    const adsetDuplicateCount = Math.max(ADSET_COUNT - 1, 0);
+    if (adsetDuplicateCount > 0) {
+      await pause(page, '스케줄링 후 광고세트 복제 설정 전 대기', 5000);
+      await setDuplicateCount(page, adsetDuplicateCount, adsetName);
+      await pause(page, '광고세트 복제 설정 후 대기', 7000);
+    }
 
     if (n === 0) {
-      await renameAdsetsAndAdsSequentially(page, ADSET_START_INDEX, 10);
+      await renameAdsetsAndAdsSequentially(page, ADSET_START_INDEX, ADSET_COUNT, AD_CREATIVE_COUNT);
     }
 
     if (ADSET_DAILY_BUDGET) {
