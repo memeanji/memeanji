@@ -782,6 +782,65 @@ async function attachMediaFromFolderIfConfigured(page) {
   await fileInput.setInputFiles(files);
 }
 
+
+async function renameDuplicatedAdsetSeries(page, fromIndex = 2, toIndex = 10) {
+  console.log('[STEP] 복제된 광고세트 이름 일괄 변경 시작');
+
+  const targets = [];
+  for (let idx = fromIndex; idx <= toIndex; idx += 1) {
+    targets.push(getAdsetName(idx));
+  }
+
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    await page.waitForTimeout(5000);
+
+    const nameInputs = page.locator('input[placeholder="여기에 광고 세트 이름을 입력하세요..."]');
+    const count = await nameInputs.count();
+    const copyInputs = [];
+
+    for (let i = 0; i < count; i += 1) {
+      const input = nameInputs.nth(i);
+      const visible = await input.isVisible().catch(() => false);
+      if (!visible) continue;
+
+      const value = await input.inputValue().catch(() => '');
+      const ariaDisabled = await input.getAttribute('aria-disabled').catch(() => 'false');
+      console.log('[DEBUG] 이름 변경 candidate:', { attempt, i, value, ariaDisabled });
+
+      if (ariaDisabled === 'true') continue;
+      if (value.includes('사본')) copyInputs.push(input);
+    }
+
+    if (!copyInputs.length) {
+      console.log(`[WAIT] 사본 이름 input 미탐지 재시도 ${attempt}/10`);
+      await page.waitForTimeout(5000);
+      continue;
+    }
+
+    const renameCount = Math.min(copyInputs.length, targets.length);
+
+    for (let i = 0; i < renameCount; i += 1) {
+      const input = copyInputs[i];
+      const targetName = targets[i];
+      await input.click({ force: true });
+      await page.waitForTimeout(1000);
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+      await page.keyboard.press('Backspace');
+      await page.keyboard.type(targetName, { delay: 60 });
+      await page.waitForTimeout(1000);
+      const actual = await input.inputValue().catch(() => '');
+      console.log('[DEBUG] 이름 변경 결과:', { i, targetName, actual });
+    }
+
+    await page.waitForTimeout(7000);
+    console.log('[STEP] 복제된 광고세트 이름 일괄 변경 완료');
+    return true;
+  }
+
+  await page.screenshot({ path: path.join(DIRS.screenshots, 'duplicate-adset-rename-failed.png'), fullPage: true });
+  throw new Error('복제된 광고세트 이름 변경에 실패했습니다.');
+}
+
 async function runFlow(page) {
   console.log('[STEP] Ads Manager 접속');
   await page.goto('https://adsmanager.facebook.com/adsmanager/manage/campaigns', { waitUntil: 'domcontentloaded' });
@@ -833,6 +892,10 @@ async function runFlow(page) {
     await pause(page, '스케줄링 후 광고세트 복제 설정 전 대기', 5000);
     await setDuplicateCount(page, 9, adsetName);
     await pause(page, '광고세트 복제 설정 후 대기', 7000);
+
+    if (n === 0) {
+      await renameDuplicatedAdsetSeries(page, ADSET_START_INDEX + 1, ADSET_START_INDEX + 9);
+    }
 
     if (ADSET_DAILY_BUDGET) {
       await fillAdsetBudgetInModalOnly(page, ADSET_DAILY_BUDGET);
