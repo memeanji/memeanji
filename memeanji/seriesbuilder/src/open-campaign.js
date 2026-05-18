@@ -884,17 +884,39 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
 
 async function fillLandingUrlOnly(page, targetAdName) {
   const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${targetAdName}`;
-  const landingInput = page.locator('input[placeholder="http://www.example.com/page"]').first();
-  const landingVisible = await landingInput.isVisible({ timeout: 10000 }).catch(() => false);
-  if (!landingVisible) throw new Error('랜딩 URL input을 찾지 못했습니다.');
 
-  console.log('[STEP] 랜딩 URL 입력 시작(크리에이티브 설정 단계 주석 처리 모드)');
-  await landingInput.click({ force: true });
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-  await page.keyboard.press('Backspace');
-  await page.keyboard.type(targetUrl, { delay: 40 });
-  await page.waitForTimeout(3000);
-  console.log('[STEP] 랜딩 URL 입력 완료:', { targetUrl });
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    console.log(`[STEP] 랜딩 URL input 탐색 시도 ${attempt}/6`);
+    const landingInput = page
+      .locator('input[placeholder="http://www.example.com/page"], input[placeholder*="example.com/page"]')
+      .or(page.getByLabel(/웹사이트 URL|website url/i))
+      .or(page.getByPlaceholder(/웹사이트 URL|website url/i))
+      .first();
+
+    const landingVisible = await landingInput.isVisible({ timeout: 5000 }).catch(() => false);
+    if (landingVisible) {
+      console.log('[STEP] 랜딩 URL 입력 시작(크리에이티브 설정 단계 주석 처리 모드)');
+      await landingInput.click({ force: true });
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+      await page.keyboard.press('Backspace');
+      await page.keyboard.type(targetUrl, { delay: 40 });
+      await page.waitForTimeout(3000);
+      console.log('[STEP] 랜딩 URL 입력 완료:', { targetUrl });
+      return;
+    }
+
+    // 직접 화면에서 URL 섹션을 노출시키기 위한 보정
+    await page.mouse.wheel(0, 500);
+    await page.waitForTimeout(2500);
+
+    if (attempt === 3) {
+      console.log('[WARN] 랜딩 URL input 미감지 - 크리에이티브 설정 재진입 후 재시도');
+      await openCreativeSettingsAndFillLandingUrl(page, targetAdName);
+      return;
+    }
+  }
+
+  throw new Error('랜딩 URL input을 찾지 못했습니다.');
 }
 
 async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
