@@ -777,18 +777,62 @@ async function enterAdsetFlow(page) {
 
 
 async function selectImageAdModeWithRequestedClasses(page) {
-  const gate = page.locator('div.x78zum5.x1iyjqo2').first();
-  await gate.waitFor({ state: 'visible', timeout: 60000 });
+  // 1) contextual layer root 대기
+  const layerRoot = page.locator('div[data-testid="ContextualLayerRoot"], div.uiContextualLayerParent.xu96u03.xm80bdy').first();
+  await layerRoot.waitFor({ state: 'visible', timeout: 60000 });
   await page.waitForTimeout(3000);
 
-  const target = page.locator('div.x6s0dn4.x78zum5.x1q0g3np.xozqiw3.x2lwn1j.xeuugli.x1iyjqo2.x8va1my.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x1y1aw1k.xwib8y2.xmzvs34.xf159sx.xo1l8bm.xbsr9hj.x1v911su').first();
-  await target.waitFor({ state: 'visible', timeout: 60000 });
+  // 2) 내부 메뉴 컨테이너 대기
+  const menuContainer = layerRoot.locator('div.x1gzqxud.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x1xp1s0c.x5yr21d.xh8yej3.x1g2r6go.x6o7n8i.xw7d9y7.x12w9bfk.xg01cxk.x1v84ljc').first();
+  const menuVisible = await menuContainer.isVisible({ timeout: 15000 }).catch(() => false);
+  if (!menuVisible) {
+    console.log('[WAIT] 이미지 광고 메뉴 컨테이너 미확인 - fallback 탐색 진행');
+  }
   await page.waitForTimeout(3000);
-  await target.click({ force: true }).catch(async () => {
-    const box = await target.boundingBox();
-    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  });
-  await page.waitForTimeout(5000);
+
+  // 3) 이미지 광고 menuitem(요청 DOM) 우선 클릭
+  const imageMenuItem = layerRoot
+    .locator('div[role="menuitem"][data-surface*="browse-image-library-dropdown-item"]')
+    .filter({ has: layerRoot.locator('div[id^="js_"]').filter({ hasText: /^이미지 광고$/ }) })
+    .first();
+
+  let clicked = false;
+  for (let attempt = 1; attempt <= 10 && !clicked; attempt += 1) {
+    console.log(`[STEP] 이미지 광고 menuitem 클릭 시도 ${attempt}/10`);
+    const visible = await imageMenuItem.isVisible({ timeout: 5000 }).catch(() => false);
+    if (visible) {
+      await page.waitForTimeout(3000);
+      await imageMenuItem.click({ force: true }).then(() => { clicked = true; }).catch(() => null);
+      if (!clicked) {
+        const box = await imageMenuItem.boundingBox().catch(() => null);
+        if (box) {
+          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2).catch(() => null);
+          clicked = true;
+        }
+      }
+      await page.waitForTimeout(5000);
+      break;
+    }
+
+    // fallback: id=js_2i0 같은 텍스트 노드 직접 클릭
+    const imageLabel = layerRoot.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: /^이미지 광고$/ }).first();
+    const labelVisible = await imageLabel.isVisible({ timeout: 3000 }).catch(() => false);
+    if (labelVisible) {
+      await imageLabel.click({ force: true }).then(() => { clicked = true; }).catch(async () => {
+        const lbox = await imageLabel.boundingBox();
+        if (lbox) await page.mouse.click(lbox.x + lbox.width / 2, lbox.y + lbox.height / 2);
+      });
+      await page.waitForTimeout(5000);
+      break;
+    }
+
+    await page.waitForTimeout(4000);
+  }
+
+  if (!clicked) {
+    await debugDump(page, 'image ad menuitem click failed');
+    throw new Error('이미지 광고 버튼 클릭 실패');
+  }
 }
 
 async function attachMediaFromFolderIfConfigured(page, targetAdName) {
