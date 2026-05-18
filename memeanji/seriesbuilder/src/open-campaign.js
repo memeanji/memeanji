@@ -783,93 +783,84 @@ async function attachMediaFromFolderIfConfigured(page) {
 }
 
 
-async function renameAdsetsSequentially(page, fromIndex = 1, toIndex = 10) {
-  console.log('[STEP] 광고세트 1~10 순차 선택/이름 변경 시작');
+async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCount = 10) {
+  console.log('[STEP] 광고세트/광고소재 순차 이름 변경 시작');
 
-  const rowSelector = '.x6s0dn4.x9f619.x78zum5.x1iorvi4.xyri2b.xjkvuk6.x1c1uobl.xwvwv9b';
-  const rowInnerSelector = 'div.x6ikm8r.x10wlt62.x1iyjqo2.xs83m0k.x1t1x2f9';
-  const nameLabelSelector = [
-    'div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x2fvf9.xr9ek0c span._3dfi._3dfj',
-    'div.x6ikm8r.x10wlt62.x1iyjqo2.xs83m0k.x1t1x2f9 span._3dfi._3dfj',
-    'span._3dfi._3dfj',
-  ];
+  const today = getTodayMMDD();
+  let adsetIndex = adsetStartIndex;
+  let adCreativeIndex = 2;
+  const adsetEndIndex = adsetStartIndex + adsetCount - 1;
 
-  for (let index = fromIndex; index <= toIndex; index += 1) {
-    const targetName = getAdsetName(index);
-    console.log('[STEP] 광고세트명 변경 대상:', { index, targetName });
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    await page.waitForTimeout(5000);
 
-    let selected = false;
-
-    for (let attempt = 1; attempt <= 10 && !selected; attempt += 1) {
-      await page.waitForTimeout(5000);
-
-      const rows = await page.locator(rowSelector).elementHandles();
-      for (const row of rows) {
-        const inner = await row.$(rowInnerSelector);
-        const rowTarget = inner ?? row;
-
-        let labelText = '';
-        for (const selector of nameLabelSelector) {
-          const labelEl = await rowTarget.$(selector);
-          if (!labelEl) continue;
-          labelText = (await labelEl.innerText().catch(() => '')).trim();
-          if (labelText) break;
-        }
-
-        if (!labelText) continue;
-        const isAdsetRow = labelText.includes('리타겟') && labelText.includes('광고세트');
-        if (!isAdsetRow) continue;
-
-        if (labelText.includes(`${index}번 광고세트`)) {
-          const box = await rowTarget.boundingBox();
-          if (!box) continue;
-          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-          await page.waitForTimeout(7000);
-          selected = true;
-          break;
-        }
-      }
-
-      if (!selected) {
-        console.log(`[WAIT] ${index}번 광고세트 row 탐색 재시도 ${attempt}/10`);
-        await page.mouse.wheel(0, 220);
-        await page.waitForTimeout(3000);
-      }
+    const rows = await page.locator('[role="row"]').elementHandles();
+    if (!rows.length) {
+      console.log(`[WAIT] row 미탐지 재시도 ${attempt}/10`);
+      continue;
     }
 
-    if (!selected) {
-      await page.screenshot({ path: path.join(DIRS.screenshots, `adset-row-select-failed-${index}.png`), fullPage: true });
-      throw new Error(`${index}번 광고세트 row 선택 실패`);
-    }
+    for (const row of rows) {
+      const rowText = (await row.innerText().catch(() => '')).trim();
+      if (!rowText) continue;
 
-    let renamed = false;
-    for (let attempt = 1; attempt <= 10 && !renamed; attempt += 1) {
-      const renameInput = page.locator('input[placeholder="여기에 광고 세트 이름을 입력하세요..."], input[placeholder="광고 세트 이름 지정"]').first();
-      const visible = await renameInput.isVisible({ timeout: 5000 }).catch(() => false);
-      if (!visible) {
-        console.log(`[WAIT] 광고세트명 input 탐색 재시도 ${attempt}/10`);
-        await page.waitForTimeout(5000);
+      const rowBox = await row.boundingBox().catch(() => null);
+      if (!rowBox) continue;
+
+      const isAdsetCopy = rowText.includes('광고세트') && rowText.includes('사본');
+      const isAdCopy = rowText.includes('새 판매 광고') || rowText.includes('광고 - 사본') || rowText.includes('광고명');
+
+      if (isAdsetCopy && adsetIndex <= adsetEndIndex) {
+        await page.mouse.click(rowBox.x + rowBox.width / 2, rowBox.y + rowBox.height / 2);
+        await page.waitForTimeout(7000);
+
+        const targetAdsetName = getAdsetName(adsetIndex);
+        const adsetInput = page.locator('input[placeholder="여기에 광고 세트 이름을 입력하세요..."], input[placeholder="광고 세트 이름 지정"]').first();
+        const visible = await adsetInput.isVisible({ timeout: 5000 }).catch(() => false);
+        if (visible) {
+          await adsetInput.click({ force: true });
+          await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+          await page.keyboard.press('Backspace');
+          await page.keyboard.type(targetAdsetName, { delay: 60 });
+          await page.waitForTimeout(5000);
+          console.log('[STEP] 광고세트명 변경:', { targetAdsetName });
+          adsetIndex += 1;
+          adCreativeIndex = 2;
+        }
         continue;
       }
 
-      await page.waitForTimeout(5000);
-      await renameInput.click({ force: true });
-      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-      await page.keyboard.press('Backspace');
-      await page.keyboard.type(targetName, { delay: 60 });
-      await page.waitForTimeout(7000);
-      const actual = await renameInput.inputValue().catch(() => '');
-      console.log('[DEBUG] 광고세트명 변경 결과:', { index, targetName, actual });
-      if (actual.includes(`${index}번 광고세트`)) renamed = true;
+      if (isAdCopy) {
+        await page.mouse.click(rowBox.x + rowBox.width / 2, rowBox.y + rowBox.height / 2);
+        await page.waitForTimeout(7000);
+
+        const adNameInput = page.locator('input[placeholder="여기에 광고 이름을 입력하세요..."], input[placeholder*="광고 이름"], input[value*="새 판매 광고"]').first();
+        const visible = await adNameInput.isVisible({ timeout: 5000 }).catch(() => false);
+        if (!visible) continue;
+
+        const targetAdName = `f_i_o_l_${today}_${String(adCreativeIndex)}`;
+        await adNameInput.click({ force: true });
+        await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+        await page.keyboard.press('Backspace');
+        await page.keyboard.type(targetAdName, { delay: 60 });
+        await page.waitForTimeout(5000);
+        console.log('[STEP] 광고소재명 변경:', { targetAdName });
+        adCreativeIndex += 1;
+      }
     }
 
-    if (!renamed) {
-      await page.screenshot({ path: path.join(DIRS.screenshots, `adset-rename-failed-${index}.png`), fullPage: true });
-      throw new Error(`${index}번 광고세트 이름 변경 실패`);
+    if (adsetIndex > adsetEndIndex) {
+      console.log('[STEP] 광고세트/광고소재 순차 이름 변경 완료');
+      return true;
     }
+
+    console.log(`[WAIT] 순차 이름 변경 재탐색 ${attempt}/10`);
+    await page.mouse.wheel(0, 400);
+    await page.waitForTimeout(3000);
   }
 
-  console.log('[STEP] 광고세트 1~10 순차 이름 변경 완료');
+  await page.screenshot({ path: path.join(DIRS.screenshots, 'adset-ad-rename-sequence-failed.png'), fullPage: true });
+  throw new Error('광고세트/광고소재 순차 이름 변경 실패');
 }
 
 async function runFlow(page) {
@@ -925,7 +916,7 @@ async function runFlow(page) {
     await pause(page, '광고세트 복제 설정 후 대기', 7000);
 
     if (n === 0) {
-      await renameAdsetsSequentially(page, ADSET_START_INDEX, ADSET_START_INDEX + 9);
+      await renameAdsetsAndAdsSequentially(page, ADSET_START_INDEX, 10);
     }
 
     if (ADSET_DAILY_BUDGET) {
