@@ -15,6 +15,8 @@ const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
 const SCHEDULE_TIME = process.env.SCHEDULE_TIME || '05:00';
 const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 
+let firstCreativeMediaUploaded = false;
+
 const DIRS = {
   screenshots: path.resolve('screenshots'),
 };
@@ -770,20 +772,78 @@ async function enterAdsetFlow(page) {
 }
 
 
-async function attachMediaFromFolderIfConfigured(page) {
+async function attachMediaFromFolderIfConfigured(page, targetAdName) {
   if (!MEDIA_FOLDER_PATH) return;
   const folderPath = path.resolve(MEDIA_FOLDER_PATH);
   const entries = await fs.readdir(folderPath, { withFileTypes: true });
-  const files = entries.filter((e) => e.isFile()).map((e) => path.join(folderPath, e.name)).filter((f) => /\.(png|jpe?g|webp|gif|mp4|mov)$/i.test(f));
+  const files = entries
+    .filter((e) => e.isFile())
+    .map((e) => path.join(folderPath, e.name))
+    .filter((f) => /\.(png|jpe?g|webp|gif|mp4|mov)$/i.test(f));
+
   if (!files.length) throw new Error(`MEDIA_FOLDER_PATH에 업로드 가능한 파일이 없습니다: ${folderPath}`);
 
-  const addMediaButton = page.getByRole('button', { name: /미디어|이미지|동영상|add media|upload/i }).or(page.getByText(/미디어|이미지|동영상|add media|upload/i).first());
-  if (await addMediaButton.first().isVisible({ timeout: 5000 }).catch(() => false)) await addMediaButton.first().click();
+  const imageAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: /^이미지 광고$/ }).first();
+  if (await imageAdTab.isVisible({ timeout: 8000 }).catch(() => false)) {
+    await page.waitForTimeout(5000);
+    await imageAdTab.click({ force: true }).catch(() => null);
+    await page.waitForTimeout(5000);
+  }
+
+  const uploadButton = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli').filter({ hasText: /^업로드$/ }).first();
+  if (await uploadButton.isVisible({ timeout: 10000 }).catch(() => false)) {
+    await uploadButton.click({ force: true }).catch(async () => {
+      const box = await uploadButton.boundingBox();
+      if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    });
+    await page.waitForTimeout(5000);
+  }
+
   const fileInput = page.locator('input[type="file"]').first();
   await fileInput.waitFor({ timeout: 30000 });
   await fileInput.setInputFiles(files);
+  await page.waitForTimeout(7000);
+
+  const mediaSearch = page.locator('input[placeholder="미디어 검색"]').first();
+  if (await mediaSearch.isVisible({ timeout: 10000 }).catch(() => false)) {
+    await mediaSearch.click({ force: true });
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type(targetAdName, { delay: 40 });
+    await page.waitForTimeout(5000);
+    console.log('[STEP] 업로드 후 미디어 검색:', { targetAdName });
+  }
 }
 
+
+async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
+  const creativeSettings = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x1iyjqo2').filter({ hasText: /^크리에이티브 설정$/ }).first();
+  const creativeVisible = await creativeSettings.isVisible({ timeout: 8000 }).catch(() => false);
+  if (creativeVisible) {
+    await page.waitForTimeout(5000);
+    await creativeSettings.click({ force: true }).catch(async () => {
+      const box = await creativeSettings.boundingBox();
+      if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    });
+    await page.waitForTimeout(5000);
+  } else {
+    console.log('[STEP] 크리에이티브 설정 버튼 미감지 - 계속 진행');
+  }
+
+  const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${targetAdName}`;
+  const landingInput = page.locator('input[placeholder="http://www.example.com/page"]').first();
+  const landingVisible = await landingInput.isVisible({ timeout: 10000 }).catch(() => false);
+  if (landingVisible) {
+    await landingInput.click({ force: true });
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type(targetUrl, { delay: 40 });
+    await page.waitForTimeout(3000);
+    console.log('[STEP] 랜딩 URL 입력:', { targetUrl });
+  } else {
+    console.log('[STEP] 랜딩 URL input 미감지 - 건너뜀');
+  }
+}
 
 async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCount = 10, adCreativeCount = 5) {
   console.log('[STEP] 광고세트/광고소재 순차 이름 변경 시작');
@@ -847,6 +907,15 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         await page.keyboard.type(targetAdName, { delay: 60 });
         await page.waitForTimeout(5000);
         console.log('[STEP] 광고소재명 변경:', { targetAdName });
+        await openCreativeSettingsAndFillLandingUrl(page, targetAdName);
+
+        if (adCreativeIndex === 1 && !firstCreativeMediaUploaded) {
+          await page.waitForTimeout(5000);
+          await attachMediaFromFolderIfConfigured(page, targetAdName);
+          firstCreativeMediaUploaded = true;
+          console.log('[STEP] 첫 번째 광고소재 미디어 업로드 완료');
+        }
+
         adCreativeIndex += 1;
       }
     }
@@ -933,21 +1002,10 @@ async function runFlow(page) {
       await renameAdsetsAndAdsSequentially(page, ADSET_START_INDEX, ADSET_COUNT, AD_CREATIVE_COUNT);
     }
 
-
-    if (n === 0) {
-      await attachMediaFromFolderIfConfigured(page);
-    }
   }
 
   await page.screenshot({ path: PATHS.success, fullPage: true });
 
-  const activePanel = (await page.locator('[role="dialog"]').first().innerText().catch(() => '')).split('\n')[0] || '(unknown)';
-  console.log('[DEBUG] FINAL URL:', page.url());
-  console.log('[DEBUG] FINAL TITLE:', await page.title());
-  console.log('[DEBUG] ACTIVE PANEL:', activePanel);
-
-  console.log('[STEP] 최종 검수용 pause 진입 (게시 버튼 수동)');
-  await page.pause();
 }
 
 async function main() {
