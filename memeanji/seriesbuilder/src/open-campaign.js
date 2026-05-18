@@ -773,6 +773,22 @@ async function enterAdsetFlow(page) {
 }
 
 
+
+async function selectImageAdModeWithRequestedClasses(page) {
+  const gate = page.locator('div.x78zum5.x1iyjqo2').first();
+  await gate.waitFor({ state: 'visible', timeout: 60000 });
+  await page.waitForTimeout(3000);
+
+  const target = page.locator('div.x6s0dn4.x78zum5.x1q0g3np.xozqiw3.x2lwn1j.xeuugli.x1iyjqo2.x8va1my.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x1y1aw1k.xwib8y2.xmzvs34.xf159sx.xo1l8bm.xbsr9hj.x1v911su').first();
+  await target.waitFor({ state: 'visible', timeout: 60000 });
+  await page.waitForTimeout(3000);
+  await target.click({ force: true }).catch(async () => {
+    const box = await target.boundingBox();
+    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  });
+  await page.waitForTimeout(5000);
+}
+
 async function attachMediaFromFolderIfConfigured(page, targetAdName) {
   if (!MEDIA_FOLDER_PATH) return;
   const folderPath = path.resolve(MEDIA_FOLDER_PATH);
@@ -784,11 +800,13 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
 
   if (!files.length) throw new Error(`MEDIA_FOLDER_PATH에 업로드 가능한 파일이 없습니다: ${folderPath}`);
 
+  await selectImageAdModeWithRequestedClasses(page);
+
   const imageAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: /^이미지 광고$/ }).first();
   if (await imageAdTab.isVisible({ timeout: 8000 }).catch(() => false)) {
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(3000);
     await imageAdTab.click({ force: true }).catch(() => null);
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(3000);
   }
 
   const uploadButton = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli').filter({ hasText: /^업로드$/ }).first();
