@@ -851,10 +851,35 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
     }
 
     await page.waitForTimeout(5000);
-    await creativeSettings.click({ force: true }).catch(async () => {
-      const box = await creativeSettings.boundingBox();
-      if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    });
+    const settingBox = await creativeSettings.boundingBox().catch(() => null);
+    console.log('[DEBUG] 크리에이티브 설정 버튼 box:', settingBox);
+
+    let clicked = false;
+    await creativeSettings.click({ force: true }).then(() => { clicked = true; }).catch(() => null);
+
+    if (!clicked && settingBox) {
+      const clickTargets = [
+        { x: settingBox.x + settingBox.width / 2, y: settingBox.y + settingBox.height / 2 },
+        { x: settingBox.x + settingBox.width / 2 + 12, y: settingBox.y + settingBox.height / 2 },
+        { x: settingBox.x + settingBox.width / 2 - 12, y: settingBox.y + settingBox.height / 2 },
+        { x: settingBox.x + settingBox.width / 2, y: settingBox.y + settingBox.height / 2 + 8 },
+        { x: settingBox.x + settingBox.width / 2, y: settingBox.y + settingBox.height / 2 - 8 },
+      ];
+
+      for (const [idx, pt] of clickTargets.entries()) {
+        console.log('[DEBUG] 크리에이티브 설정 좌표 클릭 시도:', { attempt, index: idx + 1, pt });
+        await page.mouse.click(pt.x, pt.y).catch(() => null);
+        await page.waitForTimeout(2000);
+
+        const checkImage = await imageAdTab.isVisible({ timeout: 1000 }).catch(() => false);
+        const checkUpload = await uploadButton.isVisible({ timeout: 1000 }).catch(() => false);
+        if (checkImage || checkUpload) {
+          clicked = true;
+          break;
+        }
+      }
+    }
+
     await page.waitForTimeout(7000);
 
     const openedByImage = await imageAdTab.isVisible({ timeout: 5000 }).catch(() => false);
