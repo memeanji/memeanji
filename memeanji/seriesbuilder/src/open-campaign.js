@@ -787,7 +787,12 @@ async function renameAdsetsSequentially(page, fromIndex = 1, toIndex = 10) {
   console.log('[STEP] 광고세트 1~10 순차 선택/이름 변경 시작');
 
   const rowSelector = '.x6s0dn4.x9f619.x78zum5.x1iorvi4.xyri2b.xjkvuk6.x1c1uobl.xwvwv9b';
-  const nameLabelSelector = 'div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x2fvf9.xr9ek0c span._3dfi._3dfj';
+  const rowInnerSelector = 'div.x6ikm8r.x10wlt62.x1iyjqo2.xs83m0k.x1t1x2f9';
+  const nameLabelSelector = [
+    'div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x2fvf9.xr9ek0c span._3dfi._3dfj',
+    'div.x6ikm8r.x10wlt62.x1iyjqo2.xs83m0k.x1t1x2f9 span._3dfi._3dfj',
+    'span._3dfi._3dfj',
+  ];
 
   for (let index = fromIndex; index <= toIndex; index += 1) {
     const targetName = getAdsetName(index);
@@ -800,15 +805,23 @@ async function renameAdsetsSequentially(page, fromIndex = 1, toIndex = 10) {
 
       const rows = await page.locator(rowSelector).elementHandles();
       for (const row of rows) {
-        const labelEl = await row.$(nameLabelSelector);
-        if (!labelEl) continue;
+        const inner = await row.$(rowInnerSelector);
+        const rowTarget = inner ?? row;
 
-        const labelText = (await labelEl.innerText().catch(() => '')).trim();
+        let labelText = '';
+        for (const selector of nameLabelSelector) {
+          const labelEl = await rowTarget.$(selector);
+          if (!labelEl) continue;
+          labelText = (await labelEl.innerText().catch(() => '')).trim();
+          if (labelText) break;
+        }
+
+        if (!labelText) continue;
         const isAdsetRow = labelText.includes('리타겟') && labelText.includes('광고세트');
         if (!isAdsetRow) continue;
 
         if (labelText.includes(`${index}번 광고세트`)) {
-          const box = await row.boundingBox();
+          const box = await rowTarget.boundingBox();
           if (!box) continue;
           await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
           await page.waitForTimeout(7000);
