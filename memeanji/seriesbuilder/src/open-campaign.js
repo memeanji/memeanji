@@ -328,25 +328,19 @@ async function updateDateAndTimeBeforeContinue(page) {
   const currentDateText = await dateInput.inputValue().catch(() => '');
   console.log('[DEBUG] current date value:', currentDateText);
 
-  const match = currentDateText.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
-  if (match) {
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    const nextDate = new Date(year, month - 1, day);
-    nextDate.setDate(nextDate.getDate() + 1);
+  const today = new Date();
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  const nextDateText = `${tomorrow.getFullYear()}년 ${tomorrow.getMonth() + 1}월 ${tomorrow.getDate()}일`;
 
-    const nextDateText = `${nextDate.getFullYear()}년 ${nextDate.getMonth() + 1}월 ${nextDate.getDate()}일`;
-    await dateInput.click();
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-    await page.keyboard.press('Backspace');
-    await page.keyboard.type(nextDateText, { delay: 50 });
-    await page.waitForTimeout(2000);
-    console.log('[DEBUG] updated date value:', await dateInput.inputValue().catch(() => ''));
-    await pause(page, '날짜 변경 반영 대기', 2000);
-  } else {
-    console.log('[DEBUG] 날짜 파싱 실패, 기존 값 유지:', currentDateText);
-  }
+  console.log('[DEBUG] schedule date target (today+1):', nextDateText);
+
+  await dateInput.click();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type(nextDateText, { delay: 50 });
+  await page.waitForTimeout(2000);
+  console.log('[DEBUG] updated date value:', await dateInput.inputValue().catch(() => ''));
+  await pause(page, '날짜 변경 반영 대기', 2000);
 
   const { hour, minute } = parseScheduleTime(SCHEDULE_TIME);
   const targetTimeText = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
@@ -623,6 +617,66 @@ async function setDuplicateCount(page, count = 5) {
   }
 
   console.log(`[STEP] 복제 개수 ${count}개 설정 완료`);
+
+  await confirmDuplicateModal(page);
+}
+
+
+
+async function confirmDuplicateModal(page) {
+  console.log('[STEP] 복제 모달 하단 "복제만들기" 버튼 확인 클릭');
+
+  const duplicateCreateButton = page.locator('#pe_duplicate_create_button').first();
+
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    const visible = await duplicateCreateButton.isVisible({ timeout: 3000 }).catch(() => false);
+    const box = await duplicateCreateButton.boundingBox().catch(() => null);
+
+    console.log('[DEBUG] 복제만들기 버튼 상태:', { attempt, visible, box });
+
+    if (visible && box) {
+      await page.waitForTimeout(5000);
+      await duplicateCreateButton.click({ force: true }).catch(async () => {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+      await page.waitForTimeout(7000);
+      return true;
+    }
+
+    console.log(`[WAIT] 복제만들기 버튼 탐색 재시도 ${attempt}/6`);
+    await page.waitForTimeout(3000);
+  }
+
+  const confirmCandidates = page.locator('div, span, button').filter({ hasText: /^복제$/ });
+
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const count = await confirmCandidates.count();
+
+    for (let i = 0; i < count; i += 1) {
+      const candidate = confirmCandidates.nth(i);
+      const box = await candidate.boundingBox().catch(() => null);
+      const visible = await candidate.isVisible().catch(() => false);
+      const text = (await candidate.innerText().catch(() => '')).trim();
+
+      console.log('[DEBUG] 복제 confirm fallback candidate:', { attempt, index: i, text, visible, box });
+
+      if (!visible || !box) continue;
+      if (box.x < 900 || box.y < 480 || box.y > 700) continue;
+
+      await page.waitForTimeout(5000);
+      await candidate.click({ force: true }).catch(async () => {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+      await page.waitForTimeout(7000);
+      return true;
+    }
+
+    console.log(`[WAIT] 복제 confirm fallback 탐색 재시도 ${attempt}/4`);
+    await page.waitForTimeout(3000);
+  }
+
+  await page.screenshot({ path: path.join(DIRS.screenshots, 'duplicate-confirm-not-found.png'), fullPage: true });
+  throw new Error('복제 모달의 확인용 "복제만들기" 버튼을 찾지 못했습니다.');
 }
 
 async function clickContinueButtonOnly(page) {
