@@ -947,6 +947,10 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
     throw new Error('크리에이티브 설정 진입 실패: 이미지 광고/업로드 확인 불가');
   }
 
+  console.log('[STEP] 크리에이티브 설정 진입 후 이미지 광고 선택 단계 시작');
+  await selectImageAdModeWithRequestedClasses(page);
+  await page.waitForTimeout(4000);
+
   const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${targetAdName}`;
   const landingInput = page.locator('input[placeholder="http://www.example.com/page"]').first();
   const landingVisible = await landingInput.isVisible({ timeout: 10000 }).catch(() => false);
