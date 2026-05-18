@@ -810,7 +810,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const rowBox = await row.boundingBox().catch(() => null);
       if (!rowBox) continue;
 
-      const isAdsetCopy = rowText.includes('광고세트') && rowText.includes('사본');
+      const isAdsetCopy = (rowText.includes('광고세트') && rowText.includes('사본')) || /리타겟\s*\d+번\s*광고세트/.test(rowText);
       const isAdCopy = rowText.includes('새 판매 광고') || rowText.includes('광고 - 사본') || rowText.includes('광고명');
 
       if (isAdsetCopy && adsetIndex <= adsetEndIndex) {
@@ -818,7 +818,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         await page.waitForTimeout(7000);
 
         const targetAdsetName = getAdsetName(adsetIndex);
-        const adsetInput = page.locator('input[placeholder="여기에 광고 세트 이름을 입력하세요..."], input[placeholder="광고 세트 이름 지정"]').first();
+        const adsetInput = page.locator('input[placeholder="여기에 광고 세트 이름을 입력하세요..."], input[placeholder="광고 세트 이름 지정"], input[value*="광고세트"], input[value*="리타겟"]').first();
         const visible = await adsetInput.isVisible({ timeout: 5000 }).catch(() => false);
         if (visible) {
           await adsetInput.click({ force: true });
@@ -828,6 +828,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           await page.waitForTimeout(5000);
           console.log('[STEP] 광고세트명 변경:', { targetAdsetName });
           adsetIndex += 1;
+        } else {
+          console.log('[WARN] 광고세트명 input 미감지 - 변경 스킵', { rowText });
         }
         continue;
       }
@@ -905,10 +907,10 @@ async function runFlow(page) {
   await page.waitForLoadState('domcontentloaded');
   await page.screenshot({ path: PATHS.step4, fullPage: true });
 
-  for (let n = 0; n < ADSET_COUNT; n += 1) {
+  for (let n = 0; n < 1; n += 1) {
     const index = ADSET_START_INDEX + n;
     const adsetName = getAdsetName(index);
-    console.log(`[STEP] ${n + 1}/${ADSET_COUNT} 광고 세트 생성 시작: ${adsetName}`);
+    console.log(`[STEP] ${n + 1}/1 광고 세트 생성 시작: ${adsetName}`);
 
     await clickRealCreateButton(page);
     await pause(page, '만들기 버튼 클릭 후 대기', 3000);
@@ -918,6 +920,12 @@ async function runFlow(page) {
     await page.screenshot({ path: PATHS.step6, fullPage: true });
 
     await fillAdsetNameInAdsetModalOnly(page, adsetName);
+
+    if (ADSET_DAILY_BUDGET) {
+      await pause(page, '일 예산 입력 전 대기', 4000);
+      await fillAdsetBudgetInModalOnly(page, ADSET_DAILY_BUDGET);
+      await pause(page, '일 예산 입력 후 스케줄링 전 대기', 5000);
+    }
 
     const scheduleReady = await updateDateAndTimeBeforeContinue(page);
     if (!scheduleReady) {
@@ -942,9 +950,6 @@ async function runFlow(page) {
       await renameAdsetsAndAdsSequentially(page, ADSET_START_INDEX, ADSET_COUNT, AD_CREATIVE_COUNT);
     }
 
-    if (ADSET_DAILY_BUDGET) {
-      await fillAdsetBudgetInModalOnly(page, ADSET_DAILY_BUDGET);
-    }
 
     if (n === 0) {
       await attachMediaFromFolderIfConfigured(page);

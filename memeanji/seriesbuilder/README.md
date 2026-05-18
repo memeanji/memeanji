@@ -25,11 +25,13 @@
 3. `npm run open-campaign`
 
 ## 동작
+- 초기 광고세트 1개 생성 후 복제 단계로 확장
 - 캠페인 진입
 - `ADSET_COUNT` 만큼 반복 생성
-- `ADSET_CREATIVE_COUNT` 값만큼 새 판매 광고 복제
-- `ADSET_COUNT` 값만큼 광고세트 복제
+- `ADSET_CREATIVE_COUNT` 값만큼 새 판매 광고 복제 (첫 번째 복제 단계)
+- `ADSET_COUNT` 값만큼 광고세트 복제 (두 번째 복제 단계)
 - 각 반복에서 광고 세트 이름 자동 입력
+- 일 예산(ADSET_DAILY_BUDGET) 입력 후 스케줄링 진행
 - `ADSET_DAILY_BUDGET` 설정 시 예산 입력 시도
 - `보기 만들기` 패널 감지 시 닫기
 - 게시는 자동 클릭하지 않고 마지막 `page.pause()`에서 멈춤
