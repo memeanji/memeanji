@@ -746,9 +746,13 @@ async function fillAdsetBudgetInModalOnly(page, budgetValue) {
   const budgetInput = modalVisible
     ? modalRoot
       .getByLabel(/일일 예산|예산|daily budget|budget/i)
-      .or(modalRoot.getByPlaceholder(/예산|budget/i))
+      .or(modalRoot.getByPlaceholder(/예산|budget|금액을 입력하세요/i))
+      .or(modalRoot.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value*=","]'))
       .or(modalRoot.locator('input[type="text"]').filter({ hasNot: modalRoot.locator('[type="checkbox"], [role="switch"]') }).first())
-    : page.getByLabel(/일일 예산|예산|daily budget|budget/i).or(page.getByPlaceholder(/예산|budget/i));
+    : page
+      .getByLabel(/일일 예산|예산|daily budget|budget/i)
+      .or(page.getByPlaceholder(/예산|budget|금액을 입력하세요/i))
+      .or(page.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value*=","]'));
 
   const budgetEl = budgetInput.first();
   const budgetVisible = await budgetEl.isVisible({ timeout: 5000 }).catch(() => false);
