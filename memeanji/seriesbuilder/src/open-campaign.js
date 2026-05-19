@@ -1184,47 +1184,63 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   throw new Error(`정확히 일치하는 기존 업로드 이미지 검색/선택 실패: ${targetAdName}`);
 }
 
-async function clickMediaPickerNextButton(page, attemptLabel) {
-  const nextCandidates = [
+async function clickMediaPickerButton(page, buttonText, attemptLabel, dataSurfacePart = '') {
+  const escapedText = buttonText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const textPattern = new RegExp(`^${escapedText}$`);
+  const candidates = [
     {
-      name: 'ads omp primary data-surface',
-      locator: page
-        .locator('div[role="button"][aria-busy="false"][data-surface*="ads-omp-primary-button"]')
-        .filter({ hasText: /^다음$/ })
-        .first(),
+      name: `${buttonText} data-surface`,
+      locator: dataSurfacePart
+        ? page
+          .locator(`div[role="button"][aria-busy="false"][data-surface*="${dataSurfacePart}"]`)
+          .filter({ hasText: textPattern })
+          .first()
+        : page.locator('__never_matches__').first(),
     },
     {
-      name: 'role button next',
-      locator: page.getByRole('button', { name: /^다음$/ }).first(),
+      name: `${buttonText} role button`,
+      locator: page.getByRole('button', { name: textPattern }).first(),
     },
     {
-      name: 'next text div',
+      name: `${buttonText} text div`,
       locator: page
         .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
-        .filter({ hasText: /^다음$/ })
+        .filter({ hasText: textPattern })
         .first(),
+    },
+    {
+      name: `${buttonText} plain text`,
+      locator: page.getByText(textPattern).first(),
     },
   ];
 
-  for (const candidate of nextCandidates) {
+  for (const candidate of candidates) {
     const visible = await candidate.locator.isVisible({ timeout: 2500 }).catch(() => false);
     if (!visible) continue;
 
     await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
     await page.waitForTimeout(700);
     const box = await candidate.locator.boundingBox().catch(() => null);
-    console.log('[DEBUG] 다음 버튼 후보:', { attemptLabel, name: candidate.name, box });
+    console.log('[DEBUG] 미디어 선택 버튼 후보:', { buttonText, attemptLabel, name: candidate.name, box });
     if (!box) continue;
 
     await candidate.locator.click({ force: true }).catch(async () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
-    await page.waitForTimeout(4000);
-    console.log('[STEP] 미디어 선택 다음 버튼 클릭 완료:', { attemptLabel, candidate: candidate.name });
+    await page.waitForTimeout(5000);
+    console.log('[STEP] 미디어 선택 버튼 클릭 완료:', { buttonText, attemptLabel, candidate: candidate.name });
     return true;
   }
 
   return false;
+}
+
+async function clickMediaPickerNextButton(page, attemptLabel) {
+  return clickMediaPickerButton(page, '다음', attemptLabel, 'ads-omp-primary-button');
+}
+
+async function clickMediaPickerDoneButton(page, attemptLabel) {
+  return clickMediaPickerButton(page, '완료', attemptLabel, 'ads-omp-primary-button');
 }
 
 async function selectAllOriginalRadios(page) {
@@ -1250,18 +1266,35 @@ async function selectAllOriginalRadios(page) {
 }
 
 async function completeMediaPickerNextAndOriginalFlow(page) {
-  await clickMediaPickerNextButton(page, 'after-media-select');
-
-  for (let step = 1; step <= 5; step += 1) {
-    await page.waitForTimeout(2000);
-    await selectAllOriginalRadios(page);
-
-    const clickedNext = await clickMediaPickerNextButton(page, `post-original-${step}`);
-    if (!clickedNext) {
-      console.log('[STEP] 더 이상 미디어 선택 다음 버튼 없음 - 후속 단계 완료:', { step });
-      return;
-    }
+  const selectedNext = await clickMediaPickerNextButton(page, 'after-media-select');
+  if (!selectedNext) {
+    await debugDump(page, 'next button not found after media select');
+    throw new Error('이미지 선택 후 다음 버튼을 찾지 못했습니다.');
   }
+
+  await page.waitForTimeout(3000);
+  await selectAllOriginalRadios(page);
+
+  const cropNext = await clickMediaPickerNextButton(page, 'after-original-crop');
+  if (!cropNext) {
+    await debugDump(page, 'next button not found after original crop');
+    throw new Error('원본 자르기 선택 후 다음 버튼을 찾지 못했습니다.');
+  }
+
+  const textNext = await clickMediaPickerNextButton(page, 'after-text-step');
+  if (!textNext) {
+    await debugDump(page, 'next button not found after text step');
+    throw new Error('문구 단계 다음 버튼을 찾지 못했습니다.');
+  }
+
+  const doneClicked = await clickMediaPickerDoneButton(page, 'image-generation-complete');
+  if (!doneClicked) {
+    await debugDump(page, 'done button not found after image generation');
+    throw new Error('이미지 생성 단계 완료 버튼을 찾지 못했습니다.');
+  }
+
+  await page.waitForTimeout(5000);
+  console.log('[STEP] 이미지 선택/자르기/문구/생성 완료 흐름 완료');
 }
 
 async function fillLandingUrlOnly(page, targetAdName) {
@@ -1498,9 +1531,20 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         await page.keyboard.type(targetAdName, { delay: 60 });
         await page.waitForTimeout(5000);
         console.log('[STEP] 광고소재명 변경:', { targetAdName });
+        const actualAdName = await adNameInput.inputValue().catch(() => '');
+        console.log('[DEBUG] 광고소재명 입력 확인:', { targetAdName, actualAdName });
+        if (!actualAdName.includes(targetAdName)) {
+          throw new Error(`광고소재명 입력 확인 실패: expected=${targetAdName}, actual=${actualAdName}`);
+        }
+
         // await openCreativeSettingsAndFillLandingUrl(page, targetAdName);
         await fillLandingUrlOnly(page, targetAdName);
+        await page.waitForTimeout(5000);
+        console.log('[STEP] 랜딩 URL 단계 완료 후 안정화 대기 완료:', { targetAdName });
+
         await enterCreativeInsideEditor(page);
+        await page.waitForTimeout(5000);
+        console.log('[STEP] 크리에이티브 설정 -> 이미지 광고 단계 완료 후 안정화 대기 완료:', { targetAdName });
 
         if (adCreativeIndex === 1 && !firstCreativeMediaUploaded) {
           await page.waitForTimeout(5000);
@@ -1513,6 +1557,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           console.log('[STEP] 기존 업로드 이미지 선택 완료:', { targetAdName });
         }
 
+        await page.waitForTimeout(7000);
+        console.log('[STEP] 광고소재 미디어 처리 전체 완료 - 다음 광고 탐색 전 대기 완료:', { targetAdName });
 
         adCreativeIndex += 1;
       }
