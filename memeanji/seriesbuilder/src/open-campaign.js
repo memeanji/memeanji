@@ -1391,19 +1391,52 @@ async function clickVisibleMediaImageOnce(page, targetAdName) {
         rect.left > 250;
     };
 
-    const targets = [...document.querySelectorAll('div._5f0d, img._5i4g, img')]
+    const scoreTarget = (el) => {
+      const styleAttr = el.getAttribute('style') || '';
+      const cachekey = el.getAttribute('cachekey') || '';
+      let score = 0;
+      if (cachekey.includes('ACCOUNT_1838892106940197:5fcb2558443858feef4df9bbdfe93c06')) score += 1000;
+      if (cachekey.startsWith('ACCOUNT_')) score += 500;
+      if (styleAttr.includes('width: 96px') && styleAttr.includes('height: 96px')) score += 300;
+      if (styleAttr.includes('left: 0px') && styleAttr.includes('top: 0px')) score += 100;
+      if (el.classList.contains('_5f0d')) score += 80;
+      if (el.classList.contains('_5i4g')) score += 60;
+      return score;
+    };
+
+    const targets = [...document.querySelectorAll(
+      '[cachekey="ACCOUNT_1838892106940197:5fcb2558443858feef4df9bbdfe93c06"], [cachekey^="ACCOUNT_"], div._5f0d, img._5i4g, img, [style*="width: 96px"][style*="height: 96px"]'
+    )]
       .filter((el) => visible(el))
       .map((el, index) => {
         const box = el.getBoundingClientRect();
+        const parentBoxes = [];
+        let parent = el.parentElement;
+        for (let depth = 0; parent && depth < 5; depth += 1) {
+          const parentBox = parent.getBoundingClientRect();
+          if (parentBox.width >= 40 && parentBox.height >= 40) {
+            parentBoxes.push({
+              depth,
+              tagName: parent.tagName,
+              className: parent.getAttribute('class') || '',
+              box: { x: parentBox.x, y: parentBox.y, width: parentBox.width, height: parentBox.height },
+            });
+          }
+          parent = parent.parentElement;
+        }
         return {
           index,
           tagName: el.tagName,
           className: el.getAttribute('class') || '',
+          cachekey: el.getAttribute('cachekey') || '',
+          style: el.getAttribute('style') || '',
+          score: scoreTarget(el),
           box: { x: box.x, y: box.y, width: box.width, height: box.height },
+          parentBoxes,
         };
       });
 
-    targets.sort((a, b) => (b.box.x - a.box.x) || (a.box.y - b.box.y));
+    targets.sort((a, b) => (b.score - a.score) || (b.box.x - a.box.x) || (a.box.y - b.box.y));
     return { found: targets.length > 0, target: targets[0] || null, count: targets.length };
   }).catch((error) => ({ found: false, error: error.message }));
 
@@ -1430,6 +1463,19 @@ async function clickVisibleMediaImageOnce(page, targetAdName) {
     { name: 'fixed first result top', x: 365, y: 238 },
     { name: 'fixed first result label', x: 365, y: 316 },
   ];
+
+  for (const parent of result.target.parentBoxes || []) {
+    coordinateCandidates.push({
+      name: `parent depth ${parent.depth} center`,
+      x: parent.box.x + parent.box.width / 2,
+      y: parent.box.y + parent.box.height / 2,
+    });
+    coordinateCandidates.push({
+      name: `parent depth ${parent.depth} upper left`,
+      x: parent.box.x + 18,
+      y: parent.box.y + 18,
+    });
+  }
 
   for (const candidate of coordinateCandidates) {
     console.log('[DEBUG] 이미지 좌표 후보 클릭:', { targetAdName, candidate });
