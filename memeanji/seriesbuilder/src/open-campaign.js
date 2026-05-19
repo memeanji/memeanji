@@ -868,6 +868,40 @@ async function waitForBudgetStrategyReady(page) {
   return false;
 }
 
+async function scrollToBudgetStrategyArea(page) {
+  await page.mouse.wheel(0, -450);
+  await page.waitForTimeout(1200);
+
+  const result = await page.evaluate(() => {
+    const visible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+
+    const normalize = (text) => String(text || '').replace(/\s+/g, '');
+    const strategy = [...document.querySelectorAll('div, span, label')]
+      .find((el) => visible(el) && normalize(el.textContent).includes('\uc608\uc0b0\uc804\ub7b5'));
+
+    if (!strategy) {
+      return { found: false };
+    }
+
+    strategy.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const box = strategy.getBoundingClientRect();
+    return {
+      found: true,
+      text: (strategy.textContent || '').trim().slice(0, 80),
+      box: { x: box.x, y: box.y, width: box.width, height: box.height },
+    };
+  }).catch((error) => ({ found: false, error: error.message }));
+
+  console.log('[DEBUG] 예산 전략 텍스트 강제 탐색:', result);
+  await page.waitForTimeout(1500);
+  return result.found;
+}
+
 async function forceSetBudgetByDom(page, formattedBudget) {
   const result = await page.evaluate((value) => {
     const visible = (el) => {
@@ -909,7 +943,7 @@ async function forceSetBudgetByDom(page, formattedBudget) {
         .sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)[0]?.input || null;
     }
 
-    target ||= amountInputs[0] || null;
+    target ||= amountInputs.find((input) => input.value === '20,000') || amountInputs[0] || null;
     if (!target) {
       return {
         ok: false,
@@ -948,6 +982,7 @@ async function fillAdsetBudgetInModalOnly(page, budgetValue) {
     return;
   }
 
+  await scrollToBudgetStrategyArea(page);
   await waitForBudgetStrategyReady(page);
 
   const modalRoot = page.locator('[role="dialog"]').filter({ has: page.getByText(/광고 세트|ad set/i) }).first();
@@ -2105,6 +2140,8 @@ async function runFlow(page) {
 
     if (ADSET_DAILY_BUDGET) {
       await pause(page, '스케줄링 후 예산 전략 탐색 전 대기', 3000);
+      await page.mouse.wheel(0, -450);
+      await page.waitForTimeout(1200);
       await fillAdsetBudgetInModalOnly(page, ADSET_DAILY_BUDGET);
       await pause(page, '예산 입력 후 복제 설정 전 대기', 3000);
     }
