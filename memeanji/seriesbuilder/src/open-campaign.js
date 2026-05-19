@@ -548,6 +548,7 @@ async function openCorrectAdActionMenu(page, adsetName) {
 async function setDuplicateCount(page, count = 9, adsetName) {
   console.log('[STEP] 복제 옵션 버튼 탐색:', { adsetName, count });
   await openCorrectAdActionMenu(page, adsetName);
+  await uncheckExistingEngagementSharingOption(page);
 
   const duplicateButton = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
 
@@ -655,6 +656,72 @@ async function setDuplicateCount(page, count = 9, adsetName) {
   console.log(`[STEP] 복제 개수 ${count}개 설정 완료`);
 
   await confirmDuplicateModal(page);
+}
+
+async function uncheckExistingEngagementSharingOption(page) {
+  console.log('[STEP] 기존 공감/댓글/공유 표시 옵션 해제 확인');
+
+  const labelText = '새로운 광고에 기존 공감, 댓글 및 공유 표시하기';
+  const label = page
+    .locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2')
+    .filter({ hasText: labelText })
+    .first()
+    .or(page.getByText(labelText).first());
+
+  const labelVisible = await label.isVisible({ timeout: 5000 }).catch(() => false);
+  if (!labelVisible) {
+    console.log('[STEP] 기존 공감/댓글/공유 표시 옵션 미표시 - 건너뜀');
+    return false;
+  }
+
+  const labelBox = await label.boundingBox().catch(() => null);
+  console.log('[DEBUG] 기존 공감/댓글/공유 표시 옵션 label box:', labelBox);
+
+  const checkedInputs = await page
+    .locator('input[type="checkbox"][aria-checked="true"], input[type="checkbox"]:checked, [role="checkbox"][aria-checked="true"]')
+    .elementHandles()
+    .catch(() => []);
+
+  let targetCheckbox = null;
+  let targetBox = null;
+
+  for (const checkbox of checkedInputs) {
+    const visible = await checkbox.isVisible().catch(() => false);
+    if (!visible) continue;
+
+    const box = await checkbox.boundingBox().catch(() => null);
+    if (!box) continue;
+
+    const sameRow = labelBox
+      ? Math.abs((box.y + box.height / 2) - (labelBox.y + labelBox.height / 2)) < 40
+      : true;
+    const leftOfLabel = labelBox ? box.x < labelBox.x + labelBox.width : true;
+
+    console.log('[DEBUG] 기존 공감/댓글/공유 checkbox 후보:', { box, sameRow, leftOfLabel });
+
+    if (sameRow && leftOfLabel) {
+      targetCheckbox = checkbox;
+      targetBox = box;
+      break;
+    }
+  }
+
+  if (!targetCheckbox) {
+    console.log('[STEP] 기존 공감/댓글/공유 표시 옵션이 이미 해제됐거나 체크박스 미탐지');
+    return false;
+  }
+
+  await targetCheckbox.click({ force: true }).catch(async () => {
+    await page.mouse.click(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2);
+  });
+  await page.waitForTimeout(1500);
+
+  const stillChecked = await targetCheckbox.evaluate((el) => (
+    el.getAttribute('aria-checked') === 'true' || el.checked === true
+  )).catch(() => false);
+
+  console.log('[STEP] 기존 공감/댓글/공유 표시 옵션 해제 완료:', { stillChecked });
+  return !stillChecked;
 }
 
 
