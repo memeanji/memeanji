@@ -60,6 +60,10 @@ function getAdName(index) {
   return `f_i_o_l_${getTodayMMDD()}_${String(index).padStart(2, '0')}`;
 }
 
+function getLandingCampaignName(adName) {
+  return String(adName).replace(/_(\d+)$/, (_, index) => `_${Number(index)}`);
+}
+
 
 function parseScheduleTime(value) {
   const m = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
@@ -1170,8 +1174,6 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
 
   console.log('[STEP] 정확한 업로드 이미지 검색/선택 시작:', { targetAdName });
 
-  await openAllMediaViewIfVisible(page);
-
   const mediaSearch = page
     .locator('input[placeholder="미디어 검색"], input[placeholder*="미디어"], input[type="search"]')
     .first();
@@ -1367,29 +1369,6 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   throw new Error(`정확히 일치하는 기존 업로드 이미지 검색/선택 실패: ${targetAdName}`);
 }
 
-async function openAllMediaViewIfVisible(page) {
-  const allView = page
-    .locator('a.xt0psk2.x1hl2dhg.xt0b8zv.x1vvvo52.x1fvot60.xxio538.x1qsmy5i.xq9mrsl.x1yc453h.x1h4wwuj.x1fcty0u')
-    .filter({ hasText: /모두\s*보기/ })
-    .first()
-    .or(page.getByText(/모두\s*보기/).first());
-
-  const visible = await allView.isVisible({ timeout: 5000 }).catch(() => false);
-  if (!visible) {
-    console.log('[STEP] 미디어 모두 보기 링크 미표시 - 현재 화면에서 검색 진행');
-    return false;
-  }
-
-  const box = await allView.boundingBox().catch(() => null);
-  console.log('[DEBUG] 미디어 모두 보기 링크 box:', box);
-  await allView.click({ force: true }).catch(async () => {
-    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  });
-  await page.waitForTimeout(4000);
-  console.log('[STEP] 미디어 모두 보기 진입 완료');
-  return true;
-}
-
 async function waitForOneMediaSelected(page, targetAdName) {
   const selectedLabel = page
     .locator('span.x1vvvo52.xw23nyj.x63nzvj.xbsr9hj.xq9mrsl.x1h4wwuj.x117nqv4.xeuugli')
@@ -1581,7 +1560,7 @@ async function completeMediaPickerNextAndOriginalFlow(page) {
 }
 
 async function fillLandingUrlOnly(page, targetAdName) {
-  const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${targetAdName}`;
+  const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(targetAdName)}`;
 
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     console.log(`[STEP] 랜딩 URL input 탐색 시도 ${attempt}/6`);
@@ -1687,7 +1666,7 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
   await selectImageAdModeWithRequestedClasses(page);
   await page.waitForTimeout(4000);
 
-  const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${targetAdName}`;
+  const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(targetAdName)}`;
   const landingInput = page.locator('input[placeholder="http://www.example.com/page"]').first();
   const landingVisible = await landingInput.isVisible({ timeout: 10000 }).catch(() => false);
   if (landingVisible) {
