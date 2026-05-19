@@ -8,7 +8,7 @@ const CAMPAIGN_NAME = process.env.CAMPAIGN_NAME;
 const ADSET_INDEX = process.env.ADSET_INDEX;
 const ADSET_BASE_NAME = '리타겟';
 const ADSET_START_INDEX = Number(process.env.ADSET_START_INDEX || ADSET_INDEX || 1);
-const ADSET_COUNT = Number(process.env.ADSET_COUNT || 1);
+const ADSET_COUNT = Number(process.env.ADSET_COUNT || process.env.adset_count || 1);
 const AD_CREATIVE_COUNT = Number(process.env.ADSET_CREATIVE_COUNT || process.env.AD_CREATIVE_COUNT || process.env.ADVERTISE_COUNT || 5);
 const ADSET_DAILY_BUDGET = process.env.ADSET_DAILY_BUDGET;
 const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
@@ -1398,9 +1398,9 @@ async function waitForOneMediaSelected(page, targetAdName) {
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     const selectedVisible = await selectedLabel.isVisible({ timeout: 1000 }).catch(() => false);
-    const checkedVisible = await page.locator('[role="checkbox"][aria-checked="true"], input[type="checkbox"]:checked').first().isVisible({ timeout: 500 }).catch(() => false);
-    console.log('[DEBUG] 미디어 1개 선택 확인:', { targetAdName, attempt, selectedVisible, checkedVisible });
-    if (selectedVisible || checkedVisible) {
+    const selectedText = selectedVisible ? await selectedLabel.innerText().catch(() => '') : '';
+    console.log('[DEBUG] 미디어 1개 선택 확인:', { targetAdName, attempt, selectedVisible, selectedText });
+    if (selectedVisible) {
       await page.waitForTimeout(1500);
       return true;
     }
