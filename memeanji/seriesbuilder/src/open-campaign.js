@@ -1149,6 +1149,7 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   await page.keyboard.type(targetAdName, { delay: 40 });
   await page.waitForTimeout(5000);
   console.log('[STEP] 기존 미디어 정확 검색어 입력:', { targetAdName });
+  await page.waitForTimeout(3000);
 
   if (await clickMediaResultByNameSpanAndImage(page, targetAdName)) {
     await completeMediaPickerNextAndOriginalFlow(page);
@@ -1372,6 +1373,8 @@ async function isOneMediaSelected(page) {
 
 async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
   const nameSpanSelector = 'span.x1vvvo52.xw23nyj.xo1l8bm.x63nzvj.xbsr9hj.xq9mrsl.x1h4wwuj.xeuugli';
+  await page.waitForTimeout(3000);
+
   const result = await page.evaluate((selector, target) => {
     const visible = (el) => {
       if (!el) return false;
@@ -1381,29 +1384,51 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
     };
     const normalize = (value) => String(value || '').replace(/\s+/g, '');
     const targetNormalized = normalize(target);
-    const spans = [...document.querySelectorAll(selector)]
-      .filter((span) => visible(span) && normalize(span.textContent).includes(targetNormalized));
+    const unpaddedTarget = target.replace(/_(0)(\d)$/, '_$2');
+    const unpaddedNormalized = normalize(unpaddedTarget);
+    const allSpans = [...document.querySelectorAll(selector)].filter((span) => visible(span));
+    let spans = allSpans.filter((span) => {
+      const text = normalize(span.textContent);
+      return text.includes(targetNormalized) || text.includes(unpaddedNormalized);
+    });
+
+    if (!spans.length) {
+      spans = allSpans.filter((span) => normalize(span.textContent).includes('f_i_o_l_'));
+    }
 
     const candidates = spans.map((span, index) => {
       let root = span;
       for (let depth = 0; root?.parentElement && depth < 8; depth += 1) {
         root = root.parentElement;
-        if (root.querySelector('div._5f0d, img._5i4g, img')) break;
+        if (root.querySelector('div._5f0d, img._5i4g, img, [role="checkbox"], input[type="checkbox"]')) break;
       }
 
       const image = root?.querySelector('div._5f0d, img._5i4g, img') || null;
-      const clickTarget = image || span;
+      const checkbox = root?.querySelector('[role="checkbox"], input[type="checkbox"]') || null;
+      const clickTarget = image || checkbox || root || span;
       const box = clickTarget.getBoundingClientRect();
+      const rootBox = (root || span).getBoundingClientRect();
       return {
         index,
         text: (span.textContent || '').trim(),
         box: { x: box.x, y: box.y, width: box.width, height: box.height },
+        rootBox: { x: rootBox.x, y: rootBox.y, width: rootBox.width, height: rootBox.height },
         hasImage: Boolean(image),
+        hasCheckbox: Boolean(checkbox),
       };
     }).filter((candidate) => candidate.box.width > 10 && candidate.box.height > 10);
 
     candidates.sort((a, b) => (b.box.x - a.box.x) || (a.box.y - b.box.y));
-    return { found: candidates.length > 0, candidate: candidates[0] || null, count: candidates.length };
+    return {
+      found: candidates.length > 0,
+      candidate: candidates[0] || null,
+      count: candidates.length,
+      visibleSpanCount: allSpans.length,
+      usedFallback: !allSpans.some((span) => {
+        const text = normalize(span.textContent);
+        return text.includes(targetNormalized) || text.includes(unpaddedNormalized);
+      }),
+    };
   }, nameSpanSelector, targetAdName).catch((error) => ({ found: false, error: error.message }));
 
   console.log('[DEBUG] 파일명 span 기반 미디어 후보:', { targetAdName, result });
@@ -1411,7 +1436,15 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
 
   const { box } = result.candidate;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(3000);
+
+  if (!(await isOneMediaSelected(page))) {
+    const rootBox = result.candidate.rootBox;
+    if (rootBox) {
+      await page.mouse.click(rootBox.x + rootBox.width / 2, rootBox.y + rootBox.height / 2);
+      await page.waitForTimeout(2000);
+    }
+  }
 
   if (!(await isOneMediaSelected(page))) {
     const forced = await page.evaluate((selector, target) => {
@@ -1423,19 +1456,31 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
       };
       const normalize = (value) => String(value || '').replace(/\s+/g, '');
       const targetNormalized = normalize(target);
-      const span = [...document.querySelectorAll(selector)]
-        .filter((item) => visible(item) && normalize(item.textContent).includes(targetNormalized))
+      const unpaddedTarget = target.replace(/_(0)(\d)$/, '_$2');
+      const unpaddedNormalized = normalize(unpaddedTarget);
+      let spans = [...document.querySelectorAll(selector)]
+        .filter((item) => visible(item) && (
+          normalize(item.textContent).includes(targetNormalized) ||
+          normalize(item.textContent).includes(unpaddedNormalized)
+        ));
+      if (!spans.length) {
+        spans = [...document.querySelectorAll(selector)]
+          .filter((item) => visible(item) && normalize(item.textContent).includes('f_i_o_l_'));
+      }
+      const span = spans
         .sort((a, b) => b.getBoundingClientRect().x - a.getBoundingClientRect().x)[0];
       if (!span) return { ok: false, reason: 'name span not found' };
 
       let root = span;
       for (let depth = 0; root?.parentElement && depth < 8; depth += 1) {
         root = root.parentElement;
-        if (root.querySelector('div._5f0d, img._5i4g, img')) break;
+        if (root.querySelector('div._5f0d, img._5i4g, img, [role="checkbox"], input[type="checkbox"]')) break;
       }
 
       const clickTarget = root?.querySelector('div._5f0d, img._5i4g, img') ||
+        root?.querySelector('[role="checkbox"], input[type="checkbox"]') ||
         span.closest('[role="checkbox"], label, [role="button"]') ||
+        root ||
         span;
       clickTarget.scrollIntoView({ block: 'center', inline: 'center' });
       clickTarget.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
