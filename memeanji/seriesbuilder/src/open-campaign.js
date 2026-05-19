@@ -1533,6 +1533,16 @@ async function waitForOneMediaSelected(page, targetAdName) {
   throw new Error(`이미지 선택 후 1개 선택됨 상태를 확인하지 못했습니다: ${targetAdName}`);
 }
 
+async function isOneMediaSelected(page) {
+  const selectedLabel = page
+    .locator('span.x1vvvo52.xw23nyj.x63nzvj.xbsr9hj.xq9mrsl.x1h4wwuj.x117nqv4.xeuugli')
+    .filter({ hasText: /1개\s*선택됨/ })
+    .first()
+    .or(page.getByText(/1개\s*선택됨/).first());
+
+  return selectedLabel.isVisible({ timeout: 1000 }).catch(() => false);
+}
+
 async function clickMediaCandidateAndVerifySelected(page, locator, targetAdName, name) {
   const visible = await locator.isVisible({ timeout: 3000 }).catch(() => false);
   if (!visible) return false;
@@ -1552,19 +1562,29 @@ async function clickMediaCandidateAndVerifySelected(page, locator, targetAdName,
 }
 
 async function clickRightmostMediaTileAndVerifySelected(page, selector, targetAdName) {
-  const tiles = await page.locator(selector).elementHandles().catch(() => []);
-  const candidates = [];
-
-  for (let index = 0; index < tiles.length; index += 1) {
-    const tile = tiles[index];
-    const visible = await tile.isVisible().catch(() => false);
-    if (!visible) continue;
-
-    const box = await tile.boundingBox().catch(() => null);
-    if (!box || box.width < 20 || box.height < 20) continue;
-
-    candidates.push({ tile, index, box });
-  }
+  const candidates = await page.locator(selector).evaluateAll((tiles) => {
+    return tiles
+      .map((tile, index) => {
+        const rect = tile.getBoundingClientRect();
+        const style = window.getComputedStyle(tile);
+        const visible = rect.width > 20 &&
+          rect.height > 20 &&
+          style.visibility !== 'hidden' &&
+          style.display !== 'none';
+        return {
+          index,
+          visible,
+          box: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+          text: (tile.textContent || '').trim().slice(0, 120),
+        };
+      })
+      .filter((candidate) => candidate.visible);
+  }).catch(() => []);
 
   if (!candidates.length) return false;
 
@@ -1577,11 +1597,27 @@ async function clickRightmostMediaTileAndVerifySelected(page, selector, targetAd
     candidateCount: candidates.length,
   });
 
-  await chosen.tile.scrollIntoViewIfNeeded().catch(() => null);
-  await page.waitForTimeout(700);
-  await chosen.tile.click({ force: true }).catch(async () => {
-    await page.mouse.click(chosen.box.x + chosen.box.width / 2, chosen.box.y + chosen.box.height / 2);
-  });
+  await page.mouse.click(chosen.box.x + chosen.box.width / 2, chosen.box.y + chosen.box.height / 2);
+  await page.waitForTimeout(1000);
+
+  const selectedAfterMouse = await isOneMediaSelected(page);
+  if (!selectedAfterMouse) {
+    const forced = await page.locator(selector).nth(chosen.index).evaluate((tile) => {
+      const clickable = tile.closest('[role="checkbox"], label, [role="button"]') ||
+        tile.querySelector('[role="checkbox"], input[type="checkbox"], [role="button"], label') ||
+        tile;
+      clickable.scrollIntoView({ block: 'center', inline: 'center' });
+      clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      clickable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      return {
+        tagName: clickable.tagName,
+        role: clickable.getAttribute?.('role') || '',
+        text: (clickable.textContent || '').trim().slice(0, 120),
+      };
+    }).catch((error) => ({ error: error.message }));
+    console.log('[DEBUG] 미디어 타일 DOM 강제 클릭 결과:', { targetAdName, forced });
+  }
 
   await waitForOneMediaSelected(page, targetAdName);
   console.log('[STEP] 오른쪽 끝 미디어 타일 선택 완료:', { targetAdName });
