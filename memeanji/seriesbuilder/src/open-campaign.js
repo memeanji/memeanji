@@ -1419,6 +1419,28 @@ async function clickVisibleMediaImageOnce(page, targetAdName) {
     return true;
   }
 
+  const coordinateCandidates = [
+    { name: 'image center', x: box.x + box.width / 2, y: box.y + box.height / 2 },
+    { name: 'image upper center', x: box.x + box.width / 2, y: box.y + box.height * 0.25 },
+    { name: 'image lower center', x: box.x + box.width / 2, y: box.y + box.height * 0.75 },
+    { name: 'card center', x: box.x + box.width / 2, y: box.y + box.height + 28 },
+    { name: 'card upper left', x: box.x + 16, y: box.y + 16 },
+    { name: 'card upper right', x: box.x + box.width - 16, y: box.y + 16 },
+    { name: 'fixed first result center', x: 365, y: 279 },
+    { name: 'fixed first result top', x: 365, y: 238 },
+    { name: 'fixed first result label', x: 365, y: 316 },
+  ];
+
+  for (const candidate of coordinateCandidates) {
+    console.log('[DEBUG] 이미지 좌표 후보 클릭:', { targetAdName, candidate });
+    await page.mouse.click(candidate.x, candidate.y);
+    await page.waitForTimeout(5000);
+    if (await isOneMediaSelected(page)) {
+      console.log('[STEP] 이미지 좌표 후보 클릭 선택 완료:', { targetAdName, candidate });
+      return true;
+    }
+  }
+
   console.log('[WARN] 보이는 이미지 단순 클릭 후 선택 미확인:', { targetAdName });
   return false;
 }
