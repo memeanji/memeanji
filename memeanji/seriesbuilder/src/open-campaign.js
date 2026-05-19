@@ -1179,7 +1179,7 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   console.log('[STEP] 기존 미디어 정확 검색어 입력:', { targetAdName });
 
   const mediaElements = await page
-    .locator('[role="button"], [role="checkbox"], label, div, img')
+    .locator('[role="checkbox"], input[type="checkbox"], [role="button"], label, img')
     .elementHandles()
     .catch(() => []);
   const inspected = [];
@@ -1188,42 +1188,96 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
     const visible = await element.isVisible().catch(() => false);
     if (!visible) continue;
 
-    const matchInfo = await element.evaluate((el) => {
-      const directValues = [
-        el.textContent,
-        el.getAttribute('aria-label'),
-        el.getAttribute('title'),
-        el.getAttribute('alt'),
-        el.getAttribute('data-tooltip-content'),
-      ].filter(Boolean);
+    const matchInfo = await element.evaluate((el, target) => {
+      const collectValues = (root) => {
+        const attrs = ['aria-label', 'aria-labelledby', 'aria-describedby', 'title', 'alt', 'data-tooltip-content'];
+        const values = [root.textContent];
 
-      const descendantValues = Array.from(el.querySelectorAll('img, [aria-label], [title], [alt], [data-tooltip-content]'))
-        .flatMap((child) => [
-          child.textContent,
-          child.getAttribute('aria-label'),
-          child.getAttribute('title'),
-          child.getAttribute('alt'),
-          child.getAttribute('data-tooltip-content'),
-        ])
-        .filter(Boolean);
+        for (const attr of attrs) {
+          const value = root.getAttribute?.(attr);
+          if (!value) continue;
+          values.push(value);
+          if (attr === 'aria-labelledby' || attr === 'aria-describedby') {
+            for (const id of value.split(/\s+/)) {
+              const ref = root.ownerDocument.getElementById(id);
+              if (ref) values.push(ref.textContent, ref.getAttribute('aria-label'), ref.getAttribute('title'));
+            }
+          }
+        }
 
-      const values = [...directValues, ...descendantValues]
-        .flatMap((value) => String(value).split(/\s+|\n|\r|,/))
-        .map((value) => value.trim())
-        .filter(Boolean);
+        for (const child of root.querySelectorAll?.('img, [aria-label], [aria-labelledby], [aria-describedby], [title], [alt], [data-tooltip-content]') || []) {
+          values.push(child.textContent);
+          for (const attr of attrs) {
+            const value = child.getAttribute?.(attr);
+            if (!value) continue;
+            values.push(value);
+            if (attr === 'aria-labelledby' || attr === 'aria-describedby') {
+              for (const id of value.split(/\s+/)) {
+                const ref = child.ownerDocument.getElementById(id);
+                if (ref) values.push(ref.textContent, ref.getAttribute('aria-label'), ref.getAttribute('title'));
+              }
+            }
+          }
+        }
 
-      return {
-        values: [...new Set(values)].slice(0, 30),
-        text: (el.textContent || '').trim().slice(0, 200),
+        return values
+          .filter(Boolean)
+          .flatMap((value) => String(value).split(/\s+|\n|\r|,|"/))
+          .map((value) => value.trim())
+          .filter(Boolean);
       };
-    }).catch(() => ({ values: [], text: '' }));
 
-    inspected.push(matchInfo.values.slice(0, 5));
-    if (!matchInfo.values.some((value) => exactNameRegex.test(value))) continue;
+      const mediaNameRegex = /f_i_o_l_\d{4}_\d+(\.[a-z0-9]+)?/ig;
+      const exactRegex = new RegExp(`^${target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\.[a-z0-9]+)?$`, 'i');
 
-    const clickableHandle = await element.evaluateHandle((el) => (
-      el.closest('[role="checkbox"], [role="button"], label') || el
-    )).catch(() => null);
+      const roots = [];
+      let current = el;
+      for (let depth = 0; current && depth < 7; depth += 1) {
+        roots.push(current);
+        current = current.parentElement;
+      }
+
+      for (const root of roots) {
+        const values = [...new Set(collectValues(root))];
+        const mediaNames = [...new Set(values.flatMap((value) => value.match(mediaNameRegex) || []))];
+        const exactNames = mediaNames.filter((name) => exactRegex.test(name));
+        const otherNames = mediaNames.filter((name) => !exactRegex.test(name));
+        const hasExactValue = values.some((value) => exactRegex.test(value));
+
+        if ((exactNames.length || hasExactValue) && otherNames.length === 0) {
+          return {
+            ok: true,
+            values: values.slice(0, 40),
+            mediaNames,
+            exactNames,
+            otherNames,
+            text: (root.textContent || '').trim().slice(0, 240),
+          };
+        }
+      }
+
+      const values = collectValues(el);
+      return {
+        ok: false,
+        values: [...new Set(values)].slice(0, 20),
+        mediaNames: [...new Set(values.flatMap((value) => value.match(mediaNameRegex) || []))],
+        exactNames: [],
+        otherNames: [],
+        text: (el.textContent || '').trim().slice(0, 160),
+      };
+    }, targetAdName).catch(() => ({ ok: false, values: [], mediaNames: [], exactNames: [], otherNames: [], text: '' }));
+
+    inspected.push({
+      values: matchInfo.values.slice(0, 6),
+      mediaNames: matchInfo.mediaNames,
+      text: matchInfo.text,
+    });
+    if (!matchInfo.ok) continue;
+
+    const clickableHandle = await element.evaluateHandle((el) => {
+      const card = el.closest('[role="checkbox"], label, [role="button"]') || el;
+      return card.querySelector?.('[role="checkbox"][aria-checked="false"], input[type="checkbox"]:not(:checked), input[type="radio"]:not(:checked)') || card;
+    }).catch(() => null);
     const clickable = clickableHandle?.asElement?.() || element;
 
     await clickable.scrollIntoViewIfNeeded().catch(() => null);
@@ -1233,6 +1287,7 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
       targetAdName,
       box,
       values: matchInfo.values,
+      mediaNames: matchInfo.mediaNames,
       text: matchInfo.text,
     });
     if (!box) continue;
