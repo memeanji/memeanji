@@ -2019,14 +2019,16 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
   const effectiveCreativeCount = adCreativeCount + 1;
   const adsetEndIndex = adsetStartIndex + effectiveAdsetCount - 1;
   const maxCreativeTotal = effectiveAdsetCount * effectiveCreativeCount;
+  const maxRenameAttempts = Math.max(20, maxCreativeTotal * 4);
   const processedAdsetRows = new Set();
 
-  for (let attempt = 1; attempt <= 10; attempt += 1) {
+  for (let attempt = 1; attempt <= maxRenameAttempts; attempt += 1) {
     await page.waitForTimeout(5000);
+    let progressedThisAttempt = false;
 
     const rows = await page.locator('[role="row"]').elementHandles();
     if (!rows.length) {
-      console.log(`[WAIT] row 미탐지 재시도 ${attempt}/10`);
+      console.log(`[WAIT] row 미탐지 재시도 ${attempt}/${maxRenameAttempts}`);
       continue;
     }
 
@@ -2055,6 +2057,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         processedAdsetRows.add(rowKey);
         console.log('[STEP] 광고세트명 이미 변경됨 - 다음 광고세트로 이동:', { targetAdsetName, rowKey });
         adsetIndex += 1;
+        progressedThisAttempt = true;
         continue;
       }
 
@@ -2077,6 +2080,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           }
           processedAdsetRows.add(rowKey);
           adsetIndex += 1;
+          progressedThisAttempt = true;
         }
         continue;
       }
@@ -2126,6 +2130,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         console.log('[STEP] 광고소재 미디어 처리 전체 완료 - 다음 광고 탐색 전 대기 완료:', { targetAdName });
 
         adCreativeIndex += 1;
+        progressedThisAttempt = true;
       }
     }
 
@@ -2143,8 +2148,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       return true;
     }
 
-    console.log(`[WAIT] 순차 이름 변경 재탐색 ${attempt}/10`);
-    await page.mouse.wheel(0, 400);
+    console.log(`[WAIT] 순차 이름 변경 재탐색 ${attempt}/${maxRenameAttempts}`, { progressedThisAttempt });
+    await page.mouse.wheel(0, progressedThisAttempt ? 250 : 700);
     await page.waitForTimeout(3000);
   }
 
