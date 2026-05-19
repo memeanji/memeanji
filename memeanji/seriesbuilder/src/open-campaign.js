@@ -1373,9 +1373,10 @@ async function isOneMediaSelected(page) {
 
 async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
   const nameSpanSelector = 'span.x1vvvo52.xw23nyj.xo1l8bm.x63nzvj.xbsr9hj.xq9mrsl.x1h4wwuj.xeuugli';
+  const requestedContainerSelector = 'div.x6s0dn4.x78zum5.xdt5ytf.x1a2a7pz.x13oubkp.x1ypdohk.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8';
   await page.waitForTimeout(3000);
 
-  const result = await page.evaluate((selector, target) => {
+  const result = await page.evaluate(({ selector, target, containerSelector }) => {
     const visible = (el) => {
       if (!el) return false;
       const rect = el.getBoundingClientRect();
@@ -1396,16 +1397,20 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
       spans = allSpans.filter((span) => normalize(span.textContent).includes('f_i_o_l_'));
     }
 
+    const scrollAreas = [...document.querySelectorAll('.uiScrollableArea.fade.uiScrollableAreaWithShadow, .uiScrollableArea')]
+      .filter((area) => visible(area));
+
     const candidates = spans.map((span, index) => {
-      let root = span;
+      let root = span.closest(containerSelector) || span.closest('.uiScrollableArea, .uiScrollableAreaContent') || span;
       for (let depth = 0; root?.parentElement && depth < 8; depth += 1) {
+        if (root.querySelector('button, div._5f0d, img._5i4g, img, [role="checkbox"], input[type="checkbox"]')) break;
         root = root.parentElement;
-        if (root.querySelector('div._5f0d, img._5i4g, img, [role="checkbox"], input[type="checkbox"]')) break;
       }
 
+      const button = root?.querySelector('button, [role="button"]') || null;
       const image = root?.querySelector('div._5f0d, img._5i4g, img') || null;
       const checkbox = root?.querySelector('[role="checkbox"], input[type="checkbox"]') || null;
-      const clickTarget = image || checkbox || root || span;
+      const clickTarget = button || image || checkbox || root || span;
       const box = clickTarget.getBoundingClientRect();
       const rootBox = (root || span).getBoundingClientRect();
       return {
@@ -1413,6 +1418,7 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
         text: (span.textContent || '').trim(),
         box: { x: box.x, y: box.y, width: box.width, height: box.height },
         rootBox: { x: rootBox.x, y: rootBox.y, width: rootBox.width, height: rootBox.height },
+        hasButton: Boolean(button),
         hasImage: Boolean(image),
         hasCheckbox: Boolean(checkbox),
       };
@@ -1424,12 +1430,17 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
       candidate: candidates[0] || null,
       count: candidates.length,
       visibleSpanCount: allSpans.length,
+      scrollAreaCount: scrollAreas.length,
       usedFallback: !allSpans.some((span) => {
         const text = normalize(span.textContent);
         return text.includes(targetNormalized) || text.includes(unpaddedNormalized);
       }),
     };
-  }, nameSpanSelector, targetAdName).catch((error) => ({ found: false, error: error.message }));
+  }, {
+    selector: nameSpanSelector,
+    target: targetAdName,
+    containerSelector: requestedContainerSelector,
+  }).catch((error) => ({ found: false, error: error.message }));
 
   console.log('[DEBUG] 파일명 span 기반 미디어 후보:', { targetAdName, result });
   if (!result.found || !result.candidate) return false;
@@ -1447,7 +1458,7 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
   }
 
   if (!(await isOneMediaSelected(page))) {
-    const forced = await page.evaluate((selector, target) => {
+    const forced = await page.evaluate(({ selector, target, containerSelector }) => {
       const visible = (el) => {
         if (!el) return false;
         const rect = el.getBoundingClientRect();
@@ -1471,13 +1482,14 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
         .sort((a, b) => b.getBoundingClientRect().x - a.getBoundingClientRect().x)[0];
       if (!span) return { ok: false, reason: 'name span not found' };
 
-      let root = span;
+      let root = span.closest(containerSelector) || span.closest('.uiScrollableArea, .uiScrollableAreaContent') || span;
       for (let depth = 0; root?.parentElement && depth < 8; depth += 1) {
+        if (root.querySelector('button, div._5f0d, img._5i4g, img, [role="checkbox"], input[type="checkbox"]')) break;
         root = root.parentElement;
-        if (root.querySelector('div._5f0d, img._5i4g, img, [role="checkbox"], input[type="checkbox"]')) break;
       }
 
-      const clickTarget = root?.querySelector('div._5f0d, img._5i4g, img') ||
+      const clickTarget = root?.querySelector('button, [role="button"]') ||
+        root?.querySelector('div._5f0d, img._5i4g, img') ||
         root?.querySelector('[role="checkbox"], input[type="checkbox"]') ||
         span.closest('[role="checkbox"], label, [role="button"]') ||
         root ||
@@ -1492,7 +1504,11 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
         className: clickTarget.getAttribute('class') || '',
         text: (span.textContent || '').trim(),
       };
-    }, nameSpanSelector, targetAdName).catch((error) => ({ ok: false, reason: error.message }));
+    }, {
+      selector: nameSpanSelector,
+      target: targetAdName,
+      containerSelector: requestedContainerSelector,
+    }).catch((error) => ({ ok: false, reason: error.message }));
     console.log('[DEBUG] 파일명 span 이미지 DOM 강제 클릭 결과:', { targetAdName, forced });
   }
 
