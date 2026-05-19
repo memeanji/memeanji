@@ -435,14 +435,47 @@ async function openCorrectAdActionMenu(page, adsetName) {
   console.log('[STEP] row 기준 작업 메뉴 탐색');
 
   await ensureCampaignStructureRoot(page);
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(1500);
+
+  const fastMenuBox = adsetName === '새 판매 광고'
+    ? { x: 371, y: 159, width: 44, height: 36, label: '광고 복제 작업메뉴 빠른 좌표' }
+    : { x: 407, y: 113, width: 44, height: 36, label: '광고 세트 작업메뉴 빠른 좌표' };
+
+  async function isActionMenuOpen(timeout = 3000) {
+    const actionHeading = page.locator('div[role="heading"]').filter({ hasText: /이 광고( 세트)?에 대한 작업/ }).first();
+    const actionHeadingVisible = await actionHeading.isVisible({ timeout }).catch(() => false);
+    const duplicateByClass = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
+    const duplicateVisible = await duplicateByClass.isVisible({ timeout }).catch(() => false);
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+
+    console.log('[DEBUG] 작업 메뉴 클릭 후 body text:', bodyText.slice(0, 1200));
+    console.log('[DEBUG] 광고세트 작업 heading visible:', actionHeadingVisible);
+    console.log('[DEBUG] 복제 버튼 visible:', duplicateVisible);
+
+    return actionHeadingVisible
+      || duplicateVisible
+      || bodyText.includes('이 광고 세트에 대한 작업')
+      || bodyText.includes('이 광고에 대한 작업')
+      || bodyText.includes('복제');
+  }
+
+  console.log('[DEBUG] 빠른 작업메뉴 좌표 클릭 시도:', fastMenuBox);
+  await page.mouse.click(fastMenuBox.x + fastMenuBox.width / 2, fastMenuBox.y + fastMenuBox.height / 2);
+  await page.waitForTimeout(3000);
+
+  if (await isActionMenuOpen(3000)) {
+    console.log('[STEP] 작업 메뉴 빠른 좌표 열기 성공');
+    return;
+  }
+
+  console.log('[WARN] 빠른 좌표로 작업 메뉴 확인 실패 - 기존 row 탐색으로 fallback');
 
   const adRow = page.locator(`text=${adsetName}`).first();
-  const adRowVisible = await adRow.isVisible({ timeout: 30000 }).catch(() => false);
+  const adRowVisible = await adRow.isVisible({ timeout: 15000 }).catch(() => false);
   if (!adRowVisible) {
     throw new Error(`광고세트 row를 찾지 못했습니다: ${adsetName}`);
   }
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(1500);
 
   const adRowBox = await adRow.boundingBox();
   if (!adRowBox) throw new Error(`광고세트 row 위치를 찾지 못했습니다: ${adsetName}`);
@@ -480,38 +513,28 @@ async function openCorrectAdActionMenu(page, adsetName) {
 
     if (!targetMenu) {
       console.log('[WARN] 같은 row의 작업 메뉴 후보를 찾지 못함');
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(2500);
       continue;
     }
 
     const menuBox = await targetMenu.boundingBox();
     if (!menuBox) {
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(2500);
       continue;
     }
 
     const menuTypeLabel = adsetName === '새 판매 광고' ? '광고 복제 작업메뉴 찾기' : '광고 세트 작업메뉴 찾기';
     console.log(`[DEBUG] ${menuTypeLabel}:`, menuBox);
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(1000);
     await page.mouse.click(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2);
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(4000);
 
-    const actionHeading = page.locator('div[role="heading"]').filter({ hasText: /이 광고( 세트)?에 대한 작업/ }).first();
-    const actionHeadingVisible = await actionHeading.isVisible({ timeout: 10000 }).catch(() => false);
-    const duplicateByClass = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
-    const duplicateVisible = await duplicateByClass.isVisible({ timeout: 10000 }).catch(() => false);
-    const bodyText = await page.locator('body').innerText();
-
-    console.log('[DEBUG] 작업 메뉴 클릭 후 body text:', bodyText.slice(0, 3000));
-    console.log('[DEBUG] 광고세트 작업 heading visible:', actionHeadingVisible);
-    console.log('[DEBUG] 복제 버튼 visible:', duplicateVisible);
-
-    if (actionHeadingVisible || duplicateVisible || bodyText.includes('이 광고 세트에 대한 작업') || bodyText.includes('이 광고에 대한 작업') || bodyText.includes('복제')) {
+    if (await isActionMenuOpen(5000)) {
       opened = true;
       break;
     }
 
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(2500);
   }
 
   if (!opened) {
