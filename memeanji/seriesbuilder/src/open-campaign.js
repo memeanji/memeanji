@@ -932,12 +932,18 @@ async function selectImageAdModeWithRequestedClasses(page) {
 }
 
 async function attachMediaFromFolderIfConfigured(page, targetAdName) {
-  if (!MEDIA_FOLDER_PATH) return;
+  const desktopRoot = path.join(process.env.USERPROFILE || process.env.HOME || '.', 'Desktop');
+  const targetFolderName = targetAdName.replace(/_\\d+$/, '');
+  const todayFolderName = `f_i_o_l_${getTodayMMDD()}`;
+  const folderNames = [...new Set([targetFolderName, todayFolderName])];
+  const searchRoots = [
+    desktopRoot,
+    ...(MEDIA_FOLDER_PATH ? [path.resolve(MEDIA_FOLDER_PATH)] : []),
+  ];
 
-  const mediaRoot = path.resolve(MEDIA_FOLDER_PATH);
-  const targetMediaPrefix = targetAdName.replace(/_\\d+$/, '');
-  const todayMediaPrefix = `f_i_o_l_${getTodayMMDD()}`;
-  const mediaPrefixes = [...new Set([targetMediaPrefix, todayMediaPrefix])];
+  async function pathExists(targetPath) {
+    return fs.stat(targetPath).then((stat) => stat.isDirectory()).catch(() => false);
+  }
 
   async function collectUploadFiles(rootPath) {
     const entries = await fs.readdir(rootPath, { withFileTypes: true });
@@ -947,31 +953,30 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
       .filter((f) => /\.(png|jpe?g|webp|gif)$/i.test(f));
   }
 
-  async function findDatedMediaFolder() {
-    const entries = await fs.readdir(mediaRoot, { withFileTypes: true });
-    for (const prefix of mediaPrefixes) {
-      const exact = entries.find((e) => e.isDirectory() && e.name === prefix);
-      if (exact) return path.join(mediaRoot, exact.name);
-
-      const partial = entries.find((e) => e.isDirectory() && e.name.includes(prefix));
-      if (partial) return path.join(mediaRoot, partial.name);
+  async function findExactMediaFolder() {
+    for (const root of searchRoots) {
+      for (const folderName of folderNames) {
+        const candidate = path.join(root, folderName);
+        if (await pathExists(candidate)) return candidate;
+      }
     }
     return null;
   }
 
-  const datedFolder = await findDatedMediaFolder();
-  const uploadFolder = datedFolder || mediaRoot;
-  const files = await collectUploadFiles(uploadFolder);
+  const uploadFolder = await findExactMediaFolder();
+  if (!uploadFolder) {
+    throw new Error(`바탕화면에서 날짜 이미지 폴더를 찾지 못했습니다: ${folderNames.join(', ')}`);
+  }
 
+  const files = await collectUploadFiles(uploadFolder);
   if (!files.length) {
-    throw new Error(`업로드 가능한 이미지 파일이 없습니다: ${uploadFolder} (검색 prefix: ${mediaPrefixes.join(', ')})`);
+    throw new Error(`업로드 가능한 이미지 파일이 없습니다: ${uploadFolder}`);
   }
 
   console.log('[STEP] 업로드 이미지 폴더 선택:', {
-    mediaRoot,
     uploadFolder,
     targetAdName,
-    mediaPrefixes,
+    folderNames,
     fileCount: files.length,
   });
 
@@ -1017,7 +1022,7 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
   }
 
   await page.waitForTimeout(7000);
-  console.log('[STEP] 날짜 폴더 이미지 전체 업로드 완료:', {
+  console.log('[STEP] 바탕화면 날짜 폴더 이미지 전체 업로드 완료:', {
     uploadFolder,
     fileCount: files.length,
   });
@@ -1027,9 +1032,9 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
     await mediaSearch.click({ force: true });
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
     await page.keyboard.press('Backspace');
-    await page.keyboard.type(targetMediaPrefix, { delay: 40 });
+    await page.keyboard.type(targetFolderName, { delay: 40 });
     await page.waitForTimeout(5000);
-    console.log('[STEP] 업로드 후 미디어 검색:', { targetMediaPrefix });
+    console.log('[STEP] 업로드 후 미디어 검색:', { targetFolderName });
   }
 }
 
