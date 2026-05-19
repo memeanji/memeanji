@@ -548,7 +548,6 @@ async function openCorrectAdActionMenu(page, adsetName) {
 async function setDuplicateCount(page, count = 9, adsetName) {
   console.log('[STEP] 복제 옵션 버튼 탐색:', { adsetName, count });
   await openCorrectAdActionMenu(page, adsetName);
-  await uncheckExistingEngagementSharingOption(page);
 
   const duplicateButton = page.locator('div.x1mcwxda').filter({ hasText: /^복제$/ }).first();
 
@@ -655,6 +654,7 @@ async function setDuplicateCount(page, count = 9, adsetName) {
 
   console.log(`[STEP] 복제 개수 ${count}개 설정 완료`);
 
+  await uncheckExistingEngagementSharingOption(page);
   await confirmDuplicateModal(page);
 }
 
