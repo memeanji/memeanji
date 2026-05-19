@@ -1096,7 +1096,6 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
 async function searchAndSelectExistingMedia(page, targetAdName) {
   const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const exactNameRegex = new RegExp(`^${escapeRegex(targetAdName)}(\\.[a-z0-9]+)?$`, 'i');
-  const looseNameRegex = new RegExp(escapeRegex(targetAdName), 'i');
 
   console.log('[STEP] 정확한 업로드 이미지 검색/선택 시작:', { targetAdName });
 
@@ -1112,51 +1111,75 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   await page.waitForTimeout(5000);
   console.log('[STEP] 기존 미디어 정확 검색어 입력:', { targetAdName });
 
-  const selectableCandidates = [
-    {
-      name: 'exact aria-label/title button',
-      locator: page
-        .locator('[role="button"], [role="checkbox"], label, div')
-        .filter({ hasText: exactNameRegex })
-        .first(),
-    },
-    {
-      name: 'exact image alt',
-      locator: page.locator(`img[alt="${targetAdName}"], img[alt="${targetAdName}.jpg"], img[alt="${targetAdName}.jpeg"], img[alt="${targetAdName}.png"], img[alt="${targetAdName}.webp"]`).first(),
-    },
-    {
-      name: 'loose target media tile',
-      locator: page.locator('[role="button"], [role="checkbox"], label, div').filter({ hasText: looseNameRegex }).first(),
-    },
-    {
-      name: 'first unchecked checkbox after exact search',
-      locator: page.locator('[role="checkbox"][aria-checked="false"]').first(),
-    },
-    {
-      name: 'first radio/checkbox input after exact search',
-      locator: page.locator('input[type="checkbox"], input[type="radio"], [role="checkbox"]').first(),
-    },
-  ];
+  const mediaElements = await page
+    .locator('[role="button"], [role="checkbox"], label, div, img')
+    .elementHandles()
+    .catch(() => []);
+  const inspected = [];
 
-  for (const candidate of selectableCandidates) {
-    const visible = await candidate.locator.isVisible({ timeout: 3000 }).catch(() => false);
+  for (const element of mediaElements) {
+    const visible = await element.isVisible().catch(() => false);
     if (!visible) continue;
 
-    await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
+    const matchInfo = await element.evaluate((el) => {
+      const directValues = [
+        el.textContent,
+        el.getAttribute('aria-label'),
+        el.getAttribute('title'),
+        el.getAttribute('alt'),
+        el.getAttribute('data-tooltip-content'),
+      ].filter(Boolean);
+
+      const descendantValues = Array.from(el.querySelectorAll('img, [aria-label], [title], [alt], [data-tooltip-content]'))
+        .flatMap((child) => [
+          child.textContent,
+          child.getAttribute('aria-label'),
+          child.getAttribute('title'),
+          child.getAttribute('alt'),
+          child.getAttribute('data-tooltip-content'),
+        ])
+        .filter(Boolean);
+
+      const values = [...directValues, ...descendantValues]
+        .flatMap((value) => String(value).split(/\s+|\n|\r|,/))
+        .map((value) => value.trim())
+        .filter(Boolean);
+
+      return {
+        values: [...new Set(values)].slice(0, 30),
+        text: (el.textContent || '').trim().slice(0, 200),
+      };
+    }).catch(() => ({ values: [], text: '' }));
+
+    inspected.push(matchInfo.values.slice(0, 5));
+    if (!matchInfo.values.some((value) => exactNameRegex.test(value))) continue;
+
+    const clickableHandle = await element.evaluateHandle((el) => (
+      el.closest('[role="checkbox"], [role="button"], label') || el
+    )).catch(() => null);
+    const clickable = clickableHandle?.asElement?.() || element;
+
+    await clickable.scrollIntoViewIfNeeded().catch(() => null);
     await page.waitForTimeout(700);
-    const box = await candidate.locator.boundingBox().catch(() => null);
-    console.log('[DEBUG] 정확 미디어 선택 후보:', { targetAdName, name: candidate.name, box });
+    const box = await clickable.boundingBox().catch(() => null);
+    console.log('[DEBUG] 정확 파일명 일치 미디어 후보:', {
+      targetAdName,
+      box,
+      values: matchInfo.values,
+      text: matchInfo.text,
+    });
     if (!box) continue;
 
-    await candidate.locator.click({ force: true }).catch(async () => {
+    await clickable.click({ force: true }).catch(async () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
     await page.waitForTimeout(3000);
-    console.log('[STEP] 정확히 일치하는 업로드 이미지 선택 완료:', { targetAdName, candidate: candidate.name });
+    console.log('[STEP] 정확히 일치하는 업로드 이미지 선택 완료:', { targetAdName });
     await completeMediaPickerNextAndOriginalFlow(page);
     return;
   }
 
+  console.log('[DEBUG] 정확 파일명 매칭 실패 - 검사한 값 샘플:', inspected.slice(0, 20));
   await debugDump(page, 'existing media not selected');
   throw new Error(`정확히 일치하는 기존 업로드 이미지 검색/선택 실패: ${targetAdName}`);
 }
