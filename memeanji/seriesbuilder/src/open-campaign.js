@@ -1151,6 +1151,11 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   console.log('[STEP] 기존 미디어 정확 검색어 입력:', { targetAdName });
   await page.waitForTimeout(7000);
 
+  if (await clickVisibleMediaImageOnce(page, targetAdName)) {
+    await completeMediaPickerNextAndOriginalFlow(page);
+    return;
+  }
+
   if (await clickMediaResultByNameSpanAndImage(page, targetAdName)) {
     await completeMediaPickerNextAndOriginalFlow(page);
     return;
@@ -1369,6 +1374,53 @@ async function isOneMediaSelected(page) {
     .or(page.getByText(/1개\s*선택됨/).first());
 
   return selectedLabel.isVisible({ timeout: 1000 }).catch(() => false);
+}
+
+async function clickVisibleMediaImageOnce(page, targetAdName) {
+  await page.waitForTimeout(5000);
+  const result = await page.evaluate(() => {
+    const visible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width >= 40 &&
+        rect.height >= 40 &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none' &&
+        rect.top > 80 &&
+        rect.left > 250;
+    };
+
+    const targets = [...document.querySelectorAll('div._5f0d, img._5i4g, img')]
+      .filter((el) => visible(el))
+      .map((el, index) => {
+        const box = el.getBoundingClientRect();
+        return {
+          index,
+          tagName: el.tagName,
+          className: el.getAttribute('class') || '',
+          box: { x: box.x, y: box.y, width: box.width, height: box.height },
+        };
+      });
+
+    targets.sort((a, b) => (b.box.x - a.box.x) || (a.box.y - b.box.y));
+    return { found: targets.length > 0, target: targets[0] || null, count: targets.length };
+  }).catch((error) => ({ found: false, error: error.message }));
+
+  console.log('[DEBUG] 보이는 이미지 단순 클릭 후보:', { targetAdName, result });
+  if (!result.found || !result.target) return false;
+
+  const { box } = result.target;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForTimeout(7000);
+
+  if (await isOneMediaSelected(page)) {
+    console.log('[STEP] 보이는 이미지 단순 클릭 선택 완료:', { targetAdName });
+    return true;
+  }
+
+  console.log('[WARN] 보이는 이미지 단순 클릭 후 선택 미확인:', { targetAdName });
+  return false;
 }
 
 async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
