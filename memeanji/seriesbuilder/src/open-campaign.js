@@ -781,14 +781,9 @@ async function enterAdsetFlow(page) {
 
 
 async function selectImageAdModeWithRequestedClasses(page) {
-  console.log('[STEP] 이미지 광고 선택 단계 시작');
+  console.log('[STEP] 이미지 광고 버튼 선택 단계 시작');
 
   const surfaceWrapper = page.locator('span[data-surface-wrapper="1"]').first();
-  if (await surfaceWrapper.isVisible({ timeout: 2000 }).catch(() => false)) {
-    console.log('[STEP] 이미지 광고 화면 이미 진입 확인');
-    return;
-  }
-
   const requestedWrapper = page
     .locator('div.x6s0dn4.x1q0g3np.xozqiw3.x2lwn1j.x1iyjqo2.xs83m0k.x1xsc7gk.x78zum5.xeuugli')
     .filter({ hasText: /이미지 광고/ })
@@ -799,7 +794,31 @@ async function selectImageAdModeWithRequestedClasses(page) {
     .filter({ hasText: /^이미지 광고$/ })
     .first();
 
+  const requestedIconOrButton = page
+    .locator('div.x6s0dn4.x78zum5.x1q0g3np.xozqiw3.x2lwn1j.xeuugli.x1iyjqo2.x8va1my.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x1y1aw1k.xwib8y2.xmzvs34.xf159sx.xo1l8bm.xbsr9hj.x1v911su')
+    .filter({ hasText: /이미지 광고/ })
+    .first();
+
+  const autoLoggingButton = page
+    .locator('[data-auto-logging-id="f1a363776"]')
+    .filter({ hasText: /이미지 광고/ })
+    .first();
+
+  const ariaReadyButton = page
+    .locator('[aria-busy="false"], [aria-busy="False"]')
+    .filter({ hasText: /이미지 광고/ })
+    .first();
+
+  const longClassButton = page
+    .locator('div.x1i10hfl.xjqpnuy.xc5r6h4.xqeqjp1.x1phubyo.x972fbf.x10w94by.x1qhh985.x14e42zd.x9f619.x1ypdohk.x3ct3a4.xdj266r.x14z9mp.xat24cr.x1lziwak.x2lwn1j.xeuugli.x16tdsg8.xggy1nq.x1ja2u2z.x6s0dn4.x1ejq31n.x18oe1m7.x1sy0etr.xstzfhl.x3nfvp2.xdl72j9.x1q0g3np.x2lah0s.x193iq5w.x1n2onr6.x1hl2dhg.x87ps6o.xxymvpz.xlh3980.xvmahel.x1lku1pv.x1g40iwv.x1g2r6go.x16e9yqp.x12w9bfk.x15406qy.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x1ob88yx.xaatb59.x1qgsegg.xo1l8bm.xbsr9hj.x1v911su.x1y1aw1k.xwib8y2.xv54qhq.x1g0dm76')
+    .filter({ hasText: /이미지 광고/ })
+    .first();
+
   const candidates = [
+    { name: 'data-auto-logging-id f1a363776', locator: autoLoggingButton },
+    { name: 'aria-busy false image ad', locator: ariaReadyButton },
+    { name: 'requested long button class', locator: longClassButton },
+    { name: 'requested icon/button class', locator: requestedIconOrButton },
     { name: 'requested wrapper row', locator: requestedWrapper },
     { name: 'requested image label', locator: requestedLabel },
     {
@@ -824,11 +843,21 @@ async function selectImageAdModeWithRequestedClasses(page) {
   ];
 
   for (let attempt = 1; attempt <= 12; attempt += 1) {
-    console.log(`[STEP] 이미지 광고 클릭 시도 ${attempt}/12`);
+    console.log(`[STEP] 이미지 광고 버튼 클릭 시도 ${attempt}/12`);
 
-    const wrapperVisible = await requestedWrapper.isVisible({ timeout: 3000 }).catch(() => false);
-    const labelVisible = await requestedLabel.isVisible({ timeout: 3000 }).catch(() => false);
-    console.log('[DEBUG] 이미지 광고 후보 표시 상태:', { attempt, wrapperVisible, labelVisible });
+    const surfaceVisible = await surfaceWrapper.isVisible({ timeout: 1000 }).catch(() => false);
+    const wrapperVisible = await requestedWrapper.isVisible({ timeout: 2000 }).catch(() => false);
+    const labelVisible = await requestedLabel.isVisible({ timeout: 2000 }).catch(() => false);
+    const autoLoggingVisible = await autoLoggingButton.isVisible({ timeout: 1000 }).catch(() => false);
+    const ariaReadyVisible = await ariaReadyButton.isVisible({ timeout: 1000 }).catch(() => false);
+    console.log('[DEBUG] 이미지 광고 버튼 후보 표시 상태:', {
+      attempt,
+      surfaceVisible,
+      wrapperVisible,
+      labelVisible,
+      autoLoggingVisible,
+      ariaReadyVisible,
+    });
 
     for (const candidate of candidates) {
       const visible = await candidate.locator.isVisible({ timeout: 1500 }).catch(() => false);
@@ -838,31 +867,45 @@ async function selectImageAdModeWithRequestedClasses(page) {
       await page.waitForTimeout(1000);
 
       const box = await candidate.locator.boundingBox().catch(() => null);
-      console.log('[DEBUG] 이미지 광고 클릭 후보:', { attempt, name: candidate.name, box });
+      console.log('[DEBUG] 이미지 광고 버튼 클릭 후보:', { attempt, name: candidate.name, box });
 
-      await candidate.locator.click({ force: true }).catch(async () => {
-        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      let clicked = false;
+      await candidate.locator.click({ force: true }).then(() => { clicked = true; }).catch(async () => {
+        if (box) {
+          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+          clicked = true;
+        }
       });
 
-      await page.waitForTimeout(4000);
-      const entered = await surfaceWrapper.isVisible({ timeout: 3000 }).catch(() => false);
-      console.log('[DEBUG] 이미지 광고 진입 확인(span[data-surface-wrapper="1"]):', {
+      if (!clicked) continue;
+
+      await page.waitForTimeout(5000);
+      const uploadVisible = await page
+        .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
+        .filter({ hasText: /^업로드$/ })
+        .first()
+        .isVisible({ timeout: 3000 })
+        .catch(() => false);
+      const fileInputVisible = await page.locator('input[type="file"]').first().isVisible({ timeout: 2000 }).catch(() => false);
+      const enteredSurface = await surfaceWrapper.isVisible({ timeout: 2000 }).catch(() => false);
+
+      console.log('[DEBUG] 이미지 광고 버튼 클릭 후 진입 판정:', {
         attempt,
         candidate: candidate.name,
-        entered,
+        enteredSurface,
+        uploadVisible,
+        fileInputVisible,
       });
 
-      if (entered) {
-        console.log('[STEP] 이미지 광고 진입 성공');
-        return;
-      }
+      console.log('[STEP] 이미지 광고 버튼 클릭 완료');
+      return;
     }
 
     await page.waitForTimeout(4000);
   }
 
-  await debugDump(page, 'image ad click did not navigate to surface wrapper');
-  throw new Error('이미지 광고 버튼을 클릭했지만 다음 단계로 진입하지 못했습니다.');
+  await debugDump(page, 'image ad button not clicked');
+  throw new Error('이미지 광고 버튼을 찾거나 클릭하지 못했습니다.');
 }
 
 async function attachMediaFromFolderIfConfigured(page, targetAdName) {
