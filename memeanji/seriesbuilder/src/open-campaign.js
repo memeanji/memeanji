@@ -868,6 +868,79 @@ async function waitForBudgetStrategyReady(page) {
   return false;
 }
 
+async function forceSetBudgetByDom(page, formattedBudget) {
+  const result = await page.evaluate((value) => {
+    const visible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+
+    const normalize = (text) => String(text || '').replace(/\s+/g, '');
+    const strategyNodes = [...document.querySelectorAll('div, span, label')]
+      .filter((el) => visible(el) && /예산전략|일일예산|예산및일정/.test(normalize(el.textContent)));
+    const allInputs = [...document.querySelectorAll('input[type="text"], input:not([type])')]
+      .filter((el) => visible(el));
+
+    const amountInputs = allInputs.filter((el) => {
+      const placeholder = el.getAttribute('placeholder') || '';
+      const current = el.value || '';
+      const labelText = [
+        el.getAttribute('aria-label'),
+        ...String(el.getAttribute('aria-labelledby') || '')
+          .split(/\s+/)
+          .map((id) => document.getElementById(id)?.textContent || ''),
+      ].join(' ');
+
+      return placeholder.includes('금액') ||
+        placeholder.includes('예산') ||
+        labelText.includes('예산') ||
+        current === '20,000' ||
+        /^\d{1,3}(,\d{3})+$/.test(current);
+    });
+
+    let target = null;
+    if (strategyNodes.length && amountInputs.length) {
+      const strategyBox = strategyNodes[0].getBoundingClientRect();
+      target = amountInputs
+        .map((input) => ({ input, box: input.getBoundingClientRect() }))
+        .filter(({ box }) => box.top >= strategyBox.top - 80 && box.top <= strategyBox.top + 160)
+        .sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)[0]?.input || null;
+    }
+
+    target ||= amountInputs[0] || null;
+    if (!target) {
+      return {
+        ok: false,
+        reason: 'budget amount input not found',
+        strategyCount: strategyNodes.length,
+        inputCount: allInputs.length,
+      };
+    }
+
+    target.scrollIntoView({ block: 'center', inline: 'center' });
+    target.focus();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    if (setter) setter.call(target, value);
+    else target.value = value;
+    target.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+    target.blur();
+
+    return {
+      ok: target.value === value,
+      actualValue: target.value,
+      placeholder: target.getAttribute('placeholder') || '',
+      strategyCount: strategyNodes.length,
+      amountInputCount: amountInputs.length,
+    };
+  }, formattedBudget).catch((error) => ({ ok: false, reason: error.message }));
+
+  console.log('[DEBUG] 예산 DOM 강제 입력 결과:', result);
+  return result;
+}
+
 async function fillAdsetBudgetInModalOnly(page, budgetValue) {
   const formattedBudget = formatBudgetValue(budgetValue);
   if (!formattedBudget) {
@@ -925,10 +998,17 @@ async function fillAdsetBudgetInModalOnly(page, budgetValue) {
 
     console.log('[DEBUG] 예산 입력 확인:', { expected: formattedBudget, actualValue });
     if (actualValue !== formattedBudget) {
-      throw new Error(`예산 입력 실패: expected=${formattedBudget}, actual=${actualValue}`);
+      const forced = await forceSetBudgetByDom(page, formattedBudget);
+      if (!forced.ok) {
+        throw new Error(`예산 입력 실패: expected=${formattedBudget}, actual=${actualValue}, forced=${JSON.stringify(forced)}`);
+      }
     }
   } else {
-    console.log('[STEP] 예산 입력창 미감지 - 건너뜀');
+    console.log('[STEP] 예산 입력창 미감지 - DOM 강제 입력 시도');
+    const forced = await forceSetBudgetByDom(page, formattedBudget);
+    if (!forced.ok) {
+      throw new Error(`예산 입력창 미감지 및 DOM 강제 입력 실패: expected=${formattedBudget}, forced=${JSON.stringify(forced)}`);
+    }
   }
 
 }
