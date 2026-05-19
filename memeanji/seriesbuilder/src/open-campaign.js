@@ -1013,20 +1013,61 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
     await page.waitForTimeout(1500);
   }
 
-  const exactUploadButton = page
-    .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
-    .filter({ hasText: /^업로드$/ })
-    .first();
+  const uploadButtonCandidates = [
+    {
+      name: 'upload data-surface button',
+      locator: page
+        .locator('div[role="button"][aria-busy="false"][data-surface*="creative-tool-asset-picker-upload-button"]')
+        .filter({ hasText: /^업로드$/ })
+        .first(),
+    },
+    {
+      name: 'upload long class button',
+      locator: page
+        .locator('div.x1i10hfl.xjqpnuy.xc5r6h4.xqeqjp1.x1phubyo.x972fbf.x10w94by.x1qhh985.x14e42zd.x9f619.x1ypdohk.x3ct3a4.xdj266r.x14z9mp.xat24cr.x1lziwak.x2lwn1j.xeuugli.x16tdsg8.xggy1nq.x1ja2u2z.x6s0dn4.x1ejq31n.x18oe1m7.x1sy0etr.xstzfhl.x3nfvp2.xdl72j9.x1q0g3np.x2lah0s.x193iq5w.x1n2onr6.x1hl2dhg.x87ps6o.xxymvpz.xlh3980.xvmahel.x1lku1pv.x1g40iwv.x1g2r6go.x16e9yqp.x12w9bfk.x15406qy.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x1ob88yx.xaatb59.x1qgsegg.xo1l8bm.xbsr9hj.x1v911su.x1y1aw1k.xwib8y2.xv54qhq.x1g0dm76')
+        .filter({ hasText: /^업로드$/ })
+        .first(),
+    },
+    {
+      name: 'role button upload',
+      locator: page.getByRole('button', { name: /^업로드$/ }).first(),
+    },
+    {
+      name: 'upload text div',
+      locator: page
+        .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
+        .filter({ hasText: /^업로드$/ })
+        .first(),
+    },
+  ];
 
-  const uploadButton = exactUploadButton
-    .or(page.getByRole('button', { name: /^업로드$/ }).first())
-    .or(page.getByText(/^업로드$/).first());
+  let uploadButton = null;
+  let uploadBox = null;
+  for (let attempt = 1; attempt <= 12 && !uploadButton; attempt += 1) {
+    console.log(`[STEP] 업로드 버튼 탐색/클릭 준비 ${attempt}/12`);
+    for (const candidate of uploadButtonCandidates) {
+      const visible = await candidate.locator.isVisible({ timeout: 1500 }).catch(() => false);
+      if (!visible) continue;
 
-  await uploadButton.waitFor({ state: 'visible', timeout: 60000 });
-  await uploadButton.scrollIntoViewIfNeeded().catch(() => null);
-  await page.waitForTimeout(1500);
+      await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
+      await page.waitForTimeout(700);
+      const box = await candidate.locator.boundingBox().catch(() => null);
+      console.log('[DEBUG] 업로드 버튼 후보:', { attempt, name: candidate.name, box });
+      if (!box) continue;
 
-  const uploadBox = await uploadButton.boundingBox().catch(() => null);
+      uploadButton = candidate.locator;
+      uploadBox = box;
+      break;
+    }
+
+    if (!uploadButton) await page.waitForTimeout(3000);
+  }
+
+  if (!uploadButton) {
+    await debugDump(page, 'upload button not found');
+    throw new Error('업로드 버튼을 찾지 못했습니다.');
+  }
+
   console.log('[DEBUG] 업로드 버튼 box:', uploadBox);
 
   const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 10000 }).catch(() => null);
