@@ -1101,6 +1101,76 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
   }
 }
 
+async function searchAndSelectExistingMedia(page, targetAdName) {
+  const targetFolderName = targetAdName.replace(/_\d+$/, '');
+  const searchTerms = [...new Set([targetAdName, targetFolderName])];
+  const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  console.log('[STEP] 기존 업로드 이미지 검색/선택 시작:', { targetAdName, searchTerms });
+
+  const mediaSearch = page
+    .locator('input[placeholder="미디어 검색"], input[placeholder*="미디어"], input[type="search"]')
+    .first();
+
+  await mediaSearch.waitFor({ state: 'visible', timeout: 60000 });
+
+  for (const searchTerm of searchTerms) {
+    await mediaSearch.click({ force: true });
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type(searchTerm, { delay: 40 });
+    await page.waitForTimeout(5000);
+    console.log('[STEP] 기존 미디어 검색어 입력:', { searchTerm });
+
+    const selectableCandidates = [
+      {
+        name: 'unchecked checkbox',
+        locator: page.locator('[role="checkbox"][aria-checked="false"]').first(),
+      },
+      {
+        name: 'any checkbox',
+        locator: page.locator('[role="checkbox"]').first(),
+      },
+      {
+        name: 'search term image',
+        locator: page
+          .locator('img')
+          .filter({ hasText: new RegExp(escapeRegex(searchTerm)) })
+          .first(),
+      },
+      {
+        name: 'visible image',
+        locator: page.locator('img').first(),
+      },
+      {
+        name: 'media tile button',
+        locator: page.locator('[role="button"]').filter({ hasText: new RegExp(escapeRegex(searchTerm)) }).first(),
+      },
+    ];
+
+    for (const candidate of selectableCandidates) {
+      const visible = await candidate.locator.isVisible({ timeout: 2000 }).catch(() => false);
+      if (!visible) continue;
+
+      await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
+      await page.waitForTimeout(700);
+      const box = await candidate.locator.boundingBox().catch(() => null);
+      console.log('[DEBUG] 기존 미디어 선택 후보:', { searchTerm, name: candidate.name, box });
+      if (!box) continue;
+
+      await candidate.locator.click({ force: true }).catch(async () => {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+      await page.waitForTimeout(3000);
+      console.log('[STEP] 기존 업로드 이미지 선택 완료:', { searchTerm, candidate: candidate.name });
+      return;
+    }
+  }
+
+  await debugDump(page, 'existing media not selected');
+  throw new Error(`기존 업로드 이미지 검색/선택 실패: ${targetAdName}`);
+}
+
 async function fillLandingUrlOnly(page, targetAdName) {
   const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${targetAdName}`;
 
@@ -1344,7 +1414,12 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           await attachMediaFromFolderIfConfigured(page, targetAdName);
           firstCreativeMediaUploaded = true;
           console.log('[STEP] 첫 번째 광고소재 미디어 업로드 완료');
+        } else {
+          await page.waitForTimeout(3000);
+          await searchAndSelectExistingMedia(page, targetAdName);
+          console.log('[STEP] 기존 업로드 이미지 선택 완료:', { targetAdName });
         }
+
 
         adCreativeIndex += 1;
       }
