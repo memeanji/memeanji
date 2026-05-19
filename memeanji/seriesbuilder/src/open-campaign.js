@@ -1270,7 +1270,7 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
     const clickable = clickableHandle?.asElement?.() || element;
 
     await clickable.scrollIntoViewIfNeeded().catch(() => null);
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(2500);
     const box = await clickable.boundingBox().catch(() => null);
     console.log('[DEBUG] 정확 파일명 일치 미디어 후보:', {
       targetAdName,
@@ -1813,7 +1813,7 @@ async function completeMediaPickerNextAndOriginalFlow(page) {
     throw new Error('이미지 선택 후 다음 버튼을 찾지 못했습니다.');
   }
 
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(1800);
   await selectAllOriginalRadios(page);
 
   const cropNext = await clickMediaPickerNextButton(page, 'after-original-crop');
@@ -1834,7 +1834,7 @@ async function completeMediaPickerNextAndOriginalFlow(page) {
     throw new Error('이미지 생성 단계 완료 버튼을 찾지 못했습니다.');
   }
 
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(2500);
   console.log('[STEP] 이미지 선택/자르기/문구/생성 완료 흐름 완료');
 }
 
@@ -2015,8 +2015,10 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
 
   let adsetIndex = adsetStartIndex;
   let adCreativeIndex = 1;
-  const adsetEndIndex = adsetStartIndex + adsetCount - 1;
-  const maxCreativeTotal = adsetCount * adCreativeCount;
+  const effectiveAdsetCount = adsetCount + 1;
+  const effectiveCreativeCount = adCreativeCount + 1;
+  const adsetEndIndex = adsetStartIndex + effectiveAdsetCount - 1;
+  const maxCreativeTotal = effectiveAdsetCount * effectiveCreativeCount;
   const processedAdsetRows = new Set();
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
@@ -2132,6 +2134,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       adsetEndIndex,
       adCreativeIndex,
       maxCreativeTotal,
+      effectiveAdsetCount,
+      effectiveCreativeCount,
     });
 
     if (adsetIndex > adsetEndIndex && adCreativeIndex > maxCreativeTotal) {
