@@ -1180,11 +1180,8 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   await page.waitForTimeout(5000);
   console.log('[STEP] 기존 미디어 정확 검색어 입력:', { targetAdName });
 
-  const explicitImageTile = page
-    .locator('div.x1rdy4ex.x1lxpwgx.x4vbgl9.x165d6jo.xtf92mu.xp5jslt.xcjh6jn.xq2cub4.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x13fuv20.x18b5jzi.x1q0q8m5.x1t7ytsu.xamhcws.x1alpsbp.xlxy82.xyumdvf._32rk._32rg._32rh._32ri._32rj')
-    .first();
-
-  if (await clickMediaCandidateAndVerifySelected(page, explicitImageTile, targetAdName, 'explicit image tile class')) {
+  const explicitImageTileSelector = 'div.x1rdy4ex.x1lxpwgx.x4vbgl9.x165d6jo.xtf92mu.xp5jslt.xcjh6jn.xq2cub4.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x13fuv20.x18b5jzi.x1q0q8m5.x1t7ytsu.xamhcws.x1alpsbp.xlxy82.xyumdvf._32rk._32rg._32rh._32ri._32rj';
+  if (await clickRightmostMediaTileAndVerifySelected(page, explicitImageTileSelector, targetAdName)) {
     await completeMediaPickerNextAndOriginalFlow(page);
     return;
   }
@@ -1426,6 +1423,43 @@ async function clickMediaCandidateAndVerifySelected(page, locator, targetAdName,
   });
   await waitForOneMediaSelected(page, targetAdName);
   console.log('[STEP] 미디어 명시 후보 선택 완료:', { targetAdName, name });
+  return true;
+}
+
+async function clickRightmostMediaTileAndVerifySelected(page, selector, targetAdName) {
+  const tiles = await page.locator(selector).elementHandles().catch(() => []);
+  const candidates = [];
+
+  for (let index = 0; index < tiles.length; index += 1) {
+    const tile = tiles[index];
+    const visible = await tile.isVisible().catch(() => false);
+    if (!visible) continue;
+
+    const box = await tile.boundingBox().catch(() => null);
+    if (!box || box.width < 20 || box.height < 20) continue;
+
+    candidates.push({ tile, index, box });
+  }
+
+  if (!candidates.length) return false;
+
+  candidates.sort((a, b) => (b.box.x - a.box.x) || (a.box.y - b.box.y));
+  const chosen = candidates[0];
+  console.log('[DEBUG] 오른쪽 끝 미디어 타일 선택 후보:', {
+    targetAdName,
+    chosenIndex: chosen.index,
+    chosenBox: chosen.box,
+    candidateCount: candidates.length,
+  });
+
+  await chosen.tile.scrollIntoViewIfNeeded().catch(() => null);
+  await page.waitForTimeout(700);
+  await chosen.tile.click({ force: true }).catch(async () => {
+    await page.mouse.click(chosen.box.x + chosen.box.width / 2, chosen.box.y + chosen.box.height / 2);
+  });
+
+  await waitForOneMediaSelected(page, targetAdName);
+  console.log('[STEP] 오른쪽 끝 미디어 타일 선택 완료:', { targetAdName });
   return true;
 }
 
