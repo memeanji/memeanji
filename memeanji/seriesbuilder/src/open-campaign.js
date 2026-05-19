@@ -10,7 +10,6 @@ const ADSET_BASE_NAME = '리타겟';
 const ADSET_START_INDEX = Number(process.env.ADSET_START_INDEX || ADSET_INDEX || 1);
 const ADSET_COUNT = Number(process.env.ADSET_COUNT || process.env.adset_count || 1);
 const AD_CREATIVE_COUNT = Number(process.env.ADSET_CREATIVE_COUNT || process.env.AD_CREATIVE_COUNT || process.env.ADVERTISE_COUNT || 5);
-const ADSET_DAILY_BUDGET = process.env.ADSET_DAILY_BUDGET;
 const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
 const SCHEDULE_TIME = process.env.SCHEDULE_TIME || '05:00';
 const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
@@ -63,13 +62,6 @@ function getAdName(index) {
 function getLandingCampaignName(adName) {
   return String(adName).replace(/_(\d+)$/, (_, index) => `_${Number(index)}`);
 }
-
-function formatBudgetValue(value) {
-  const digits = String(value || '').replace(/[^\d]/g, '');
-  if (!digits) return '';
-  return Number(digits).toLocaleString('en-US');
-}
-
 
 function parseScheduleTime(value) {
   const m = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
@@ -843,211 +835,6 @@ async function clickContinueButtonOnly(page) {
 }
 
 
-async function waitForBudgetStrategyReady(page) {
-  const budgetAmountInput = page.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value="20,000"], input[type="text"][value*=","]').first();
-  const requestedBudgetStrategyClass = page
-    .locator('div.x1vvvo52.x1fvot60.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.x117nqv4.xeuugli')
-    .filter({ hasText: /예산\s*전략|일일\s*예산|예산/ })
-    .first();
-  const budgetStrategyText = page.getByText(/예산\s*및\s*일정|예산\s*전략|일일\s*예산|daily budget|budget strategy/i).first();
-
-  for (let attempt = 1; attempt <= 8; attempt += 1) {
-    const inputVisible = await budgetAmountInput.isVisible({ timeout: 1000 }).catch(() => false);
-    const classVisible = await requestedBudgetStrategyClass.isVisible({ timeout: 1000 }).catch(() => false);
-    const strategyVisible = await budgetStrategyText.isVisible({ timeout: 1000 }).catch(() => false);
-    console.log('[DEBUG] 예산 전략/금액 input 대기:', { attempt, inputVisible, classVisible, strategyVisible });
-
-    if (inputVisible || classVisible || strategyVisible) {
-      await page.waitForTimeout(3000);
-      return true;
-    }
-
-    await page.waitForTimeout(1500);
-  }
-
-  return false;
-}
-
-async function scrollToBudgetStrategyArea(page) {
-  await page.mouse.wheel(0, -450);
-  await page.waitForTimeout(1200);
-
-  const result = await page.evaluate(() => {
-    const visible = (el) => {
-      if (!el) return false;
-      const rect = el.getBoundingClientRect();
-      const style = window.getComputedStyle(el);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-    };
-
-    const normalize = (text) => String(text || '').replace(/\s+/g, '');
-    const strategy = [...document.querySelectorAll('div, span, label')]
-      .find((el) => visible(el) && normalize(el.textContent).includes('\uc608\uc0b0\uc804\ub7b5'));
-
-    if (!strategy) {
-      return { found: false };
-    }
-
-    strategy.scrollIntoView({ block: 'center', inline: 'nearest' });
-    const box = strategy.getBoundingClientRect();
-    return {
-      found: true,
-      text: (strategy.textContent || '').trim().slice(0, 80),
-      box: { x: box.x, y: box.y, width: box.width, height: box.height },
-    };
-  }).catch((error) => ({ found: false, error: error.message }));
-
-  console.log('[DEBUG] 예산 전략 텍스트 강제 탐색:', result);
-  await page.waitForTimeout(1500);
-  return result.found;
-}
-
-async function forceSetBudgetByDom(page, formattedBudget) {
-  const result = await page.evaluate((value) => {
-    const visible = (el) => {
-      if (!el) return false;
-      const rect = el.getBoundingClientRect();
-      const style = window.getComputedStyle(el);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-    };
-
-    const normalize = (text) => String(text || '').replace(/\s+/g, '');
-    const strategyNodes = [...document.querySelectorAll('div, span, label')]
-      .filter((el) => visible(el) && /예산전략|일일예산|예산및일정/.test(normalize(el.textContent)));
-    const allInputs = [...document.querySelectorAll('input[type="text"], input:not([type])')]
-      .filter((el) => visible(el));
-
-    const amountInputs = allInputs.filter((el) => {
-      const placeholder = el.getAttribute('placeholder') || '';
-      const current = el.value || '';
-      const labelText = [
-        el.getAttribute('aria-label'),
-        ...String(el.getAttribute('aria-labelledby') || '')
-          .split(/\s+/)
-          .map((id) => document.getElementById(id)?.textContent || ''),
-      ].join(' ');
-
-      return placeholder.includes('금액') ||
-        placeholder.includes('예산') ||
-        labelText.includes('예산') ||
-        current === '20,000' ||
-        /^\d{1,3}(,\d{3})+$/.test(current);
-    });
-
-    let target = null;
-    if (strategyNodes.length && amountInputs.length) {
-      const strategyBox = strategyNodes[0].getBoundingClientRect();
-      target = amountInputs
-        .map((input) => ({ input, box: input.getBoundingClientRect() }))
-        .filter(({ box }) => box.top >= strategyBox.top - 80 && box.top <= strategyBox.top + 160)
-        .sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)[0]?.input || null;
-    }
-
-    target ||= amountInputs.find((input) => input.value === '20,000') || amountInputs[0] || null;
-    if (!target) {
-      return {
-        ok: false,
-        reason: 'budget amount input not found',
-        strategyCount: strategyNodes.length,
-        inputCount: allInputs.length,
-      };
-    }
-
-    target.scrollIntoView({ block: 'center', inline: 'center' });
-    target.focus();
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-    if (setter) setter.call(target, value);
-    else target.value = value;
-    target.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
-    target.dispatchEvent(new Event('change', { bubbles: true }));
-    target.blur();
-
-    return {
-      ok: target.value === value,
-      actualValue: target.value,
-      placeholder: target.getAttribute('placeholder') || '',
-      strategyCount: strategyNodes.length,
-      amountInputCount: amountInputs.length,
-    };
-  }, formattedBudget).catch((error) => ({ ok: false, reason: error.message }));
-
-  console.log('[DEBUG] 예산 DOM 강제 입력 결과:', result);
-  return result;
-}
-
-async function fillAdsetBudgetInModalOnly(page, budgetValue) {
-  const formattedBudget = formatBudgetValue(budgetValue);
-  if (!formattedBudget) {
-    console.log('[STEP] 예산 값이 비어 있어 예산 입력을 건너뜁니다:', { budgetValue });
-    return;
-  }
-
-  await scrollToBudgetStrategyArea(page);
-  await waitForBudgetStrategyReady(page);
-
-  const modalRoot = page.locator('[role="dialog"]').filter({ has: page.getByText(/광고 세트|ad set/i) }).first();
-  const modalVisible = await modalRoot.isVisible({ timeout: 3000 }).catch(() => false);
-
-  const budgetInputSelector = 'input[placeholder="금액을 입력하세요"], input[type="text"][value="20,000"], input[type="text"][value*=","]';
-  const budgetInput = modalVisible
-    ? modalRoot
-      .locator(budgetInputSelector)
-      .or(modalRoot.getByLabel(/일일 예산|예산|daily budget|budget/i))
-      .or(modalRoot.getByPlaceholder(/예산|budget|금액을 입력하세요/i))
-      .or(modalRoot.locator('input[type="text"]').filter({ hasNot: modalRoot.locator('[type="checkbox"], [role="switch"]') }).first())
-    : page
-      .locator(budgetInputSelector)
-      .or(page.getByLabel(/일일 예산|예산|daily budget|budget/i))
-      .or(page.getByPlaceholder(/예산|budget|금액을 입력하세요/i))
-      .or(page.locator('input[type="text"]').filter({ hasNot: page.locator('[type="checkbox"], [role="switch"]') }).first());
-
-  const budgetEl = budgetInput.first();
-  const budgetVisible = await budgetEl.isVisible({ timeout: 15000 }).catch(() => false);
-
-  if (budgetVisible) {
-    const disabled = await budgetEl.getAttribute('aria-disabled').catch(() => null);
-    if (disabled === 'true') {
-      console.log('[STEP] 예산 입력창 비활성(aria-disabled=true) - 건너뜀');
-      return;
-    }
-
-    console.log('[STEP] 예산 입력:', { budgetValue, formattedBudget });
-    await budgetEl.click({ force: true }).catch(() => null);
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-    await page.keyboard.press('Backspace');
-    await page.keyboard.type(formattedBudget, { delay: 40 });
-    await page.waitForTimeout(1500);
-
-    let actualValue = await budgetEl.inputValue().catch(() => '');
-    if (actualValue !== formattedBudget) {
-      console.log('[WARN] 예산 키보드 입력 확인 실패 - DOM value 직접 변경 fallback:', { expected: formattedBudget, actualValue });
-      await budgetEl.evaluate((el, value) => {
-        el.focus();
-        el.value = value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      }, formattedBudget);
-      await page.waitForTimeout(1500);
-      actualValue = await budgetEl.inputValue().catch(() => '');
-    }
-
-    console.log('[DEBUG] 예산 입력 확인:', { expected: formattedBudget, actualValue });
-    if (actualValue !== formattedBudget) {
-      const forced = await forceSetBudgetByDom(page, formattedBudget);
-      if (!forced.ok) {
-        throw new Error(`예산 입력 실패: expected=${formattedBudget}, actual=${actualValue}, forced=${JSON.stringify(forced)}`);
-      }
-    }
-  } else {
-    console.log('[STEP] 예산 입력창 미감지 - DOM 강제 입력 시도');
-    const forced = await forceSetBudgetByDom(page, formattedBudget);
-    if (!forced.ok) {
-      throw new Error(`예산 입력창 미감지 및 DOM 강제 입력 실패: expected=${formattedBudget}, forced=${JSON.stringify(forced)}`);
-    }
-  }
-
-}
-
 async function enterAdsetFlow(page) {
   await ensureAdsetCreateOpen(page);
   await page.locator('input[placeholder="광고 세트 이름 지정"], input._58al._aghb').first().waitFor({ state: 'visible', timeout: 180000 });
@@ -1363,6 +1150,11 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   await page.waitForTimeout(5000);
   console.log('[STEP] 기존 미디어 정확 검색어 입력:', { targetAdName });
 
+  if (await clickMediaResultByNameSpanAndImage(page, targetAdName)) {
+    await completeMediaPickerNextAndOriginalFlow(page);
+    return;
+  }
+
   const explicitImageTileSelector = 'div.x1rdy4ex.x1lxpwgx.x4vbgl9.x165d6jo.xtf92mu.xp5jslt.xcjh6jn.xq2cub4.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x13fuv20.x18b5jzi.x1q0q8m5.x1t7ytsu.xamhcws.x1alpsbp.xlxy82.xyumdvf._32rk._32rg._32rh._32ri._32rj';
   if (await clickRightmostMediaTileAndVerifySelected(page, explicitImageTileSelector, targetAdName)) {
     await completeMediaPickerNextAndOriginalFlow(page);
@@ -1576,6 +1368,92 @@ async function isOneMediaSelected(page) {
     .or(page.getByText(/1개\s*선택됨/).first());
 
   return selectedLabel.isVisible({ timeout: 1000 }).catch(() => false);
+}
+
+async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
+  const nameSpanSelector = 'span.x1vvvo52.xw23nyj.xo1l8bm.x63nzvj.xbsr9hj.xq9mrsl.x1h4wwuj.xeuugli';
+  const result = await page.evaluate((selector, target) => {
+    const visible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const normalize = (value) => String(value || '').replace(/\s+/g, '');
+    const targetNormalized = normalize(target);
+    const spans = [...document.querySelectorAll(selector)]
+      .filter((span) => visible(span) && normalize(span.textContent).includes(targetNormalized));
+
+    const candidates = spans.map((span, index) => {
+      let root = span;
+      for (let depth = 0; root?.parentElement && depth < 8; depth += 1) {
+        root = root.parentElement;
+        if (root.querySelector('div._5f0d, img._5i4g, img')) break;
+      }
+
+      const image = root?.querySelector('div._5f0d, img._5i4g, img') || null;
+      const clickTarget = image || span;
+      const box = clickTarget.getBoundingClientRect();
+      return {
+        index,
+        text: (span.textContent || '').trim(),
+        box: { x: box.x, y: box.y, width: box.width, height: box.height },
+        hasImage: Boolean(image),
+      };
+    }).filter((candidate) => candidate.box.width > 10 && candidate.box.height > 10);
+
+    candidates.sort((a, b) => (b.box.x - a.box.x) || (a.box.y - b.box.y));
+    return { found: candidates.length > 0, candidate: candidates[0] || null, count: candidates.length };
+  }, nameSpanSelector, targetAdName).catch((error) => ({ found: false, error: error.message }));
+
+  console.log('[DEBUG] 파일명 span 기반 미디어 후보:', { targetAdName, result });
+  if (!result.found || !result.candidate) return false;
+
+  const { box } = result.candidate;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForTimeout(1000);
+
+  if (!(await isOneMediaSelected(page))) {
+    const forced = await page.evaluate((selector, target) => {
+      const visible = (el) => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const normalize = (value) => String(value || '').replace(/\s+/g, '');
+      const targetNormalized = normalize(target);
+      const span = [...document.querySelectorAll(selector)]
+        .filter((item) => visible(item) && normalize(item.textContent).includes(targetNormalized))
+        .sort((a, b) => b.getBoundingClientRect().x - a.getBoundingClientRect().x)[0];
+      if (!span) return { ok: false, reason: 'name span not found' };
+
+      let root = span;
+      for (let depth = 0; root?.parentElement && depth < 8; depth += 1) {
+        root = root.parentElement;
+        if (root.querySelector('div._5f0d, img._5i4g, img')) break;
+      }
+
+      const clickTarget = root?.querySelector('div._5f0d, img._5i4g, img') ||
+        span.closest('[role="checkbox"], label, [role="button"]') ||
+        span;
+      clickTarget.scrollIntoView({ block: 'center', inline: 'center' });
+      clickTarget.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      clickTarget.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      clickTarget.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      return {
+        ok: true,
+        tagName: clickTarget.tagName,
+        className: clickTarget.getAttribute('class') || '',
+        text: (span.textContent || '').trim(),
+      };
+    }, nameSpanSelector, targetAdName).catch((error) => ({ ok: false, reason: error.message }));
+    console.log('[DEBUG] 파일명 span 이미지 DOM 강제 클릭 결과:', { targetAdName, forced });
+  }
+
+  await waitForOneMediaSelected(page, targetAdName);
+  console.log('[STEP] 파일명 span 확인 후 이미지 선택 완료:', { targetAdName });
+  return true;
 }
 
 async function clickMediaCandidateAndVerifySelected(page, locator, targetAdName, name) {
@@ -2002,7 +1880,11 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           await page.keyboard.press('Backspace');
           await page.keyboard.type(targetAdsetName, { delay: 60 });
           await page.waitForTimeout(5000);
-          console.log('[STEP] 광고세트명 변경:', { targetAdsetName });
+          const actualAdsetName = await adsetInput.inputValue().catch(() => '');
+          console.log('[STEP] 광고세트명 변경:', { targetAdsetName, actualAdsetName });
+          if (!actualAdsetName.includes(targetAdsetName)) {
+            throw new Error(`광고세트명 입력 확인 실패: expected=${targetAdsetName}, actual=${actualAdsetName}`);
+          }
           processedAdsetRows.add(rowKey);
           adsetIndex += 1;
         }
@@ -2136,14 +2018,6 @@ async function runFlow(page) {
     const scheduleReady = await updateDateAndTimeBeforeContinue(page);
     if (!scheduleReady) {
       throw new Error('스케줄링 영역 확인 실패: 날짜 input을 찾지 못했습니다.');
-    }
-
-    if (ADSET_DAILY_BUDGET) {
-      await pause(page, '스케줄링 후 예산 전략 탐색 전 대기', 3000);
-      await page.mouse.wheel(0, -450);
-      await page.waitForTimeout(1200);
-      await fillAdsetBudgetInModalOnly(page, ADSET_DAILY_BUDGET);
-      await pause(page, '예산 입력 후 복제 설정 전 대기', 3000);
     }
 
     const adCreativeDuplicateCount = Math.max(AD_CREATIVE_COUNT, 0);
