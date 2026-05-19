@@ -933,50 +933,105 @@ async function selectImageAdModeWithRequestedClasses(page) {
 
 async function attachMediaFromFolderIfConfigured(page, targetAdName) {
   if (!MEDIA_FOLDER_PATH) return;
-  const folderPath = path.resolve(MEDIA_FOLDER_PATH);
-  const entries = await fs.readdir(folderPath, { withFileTypes: true });
-  const files = entries
-    .filter((e) => e.isFile())
-    .map((e) => path.join(folderPath, e.name))
-    .filter((f) => /\.(png|jpe?g|webp|gif|mp4|mov)$/i.test(f));
 
-  if (!files.length) throw new Error(`MEDIA_FOLDER_PATH에 업로드 가능한 파일이 없습니다: ${folderPath}`);
+  const mediaRoot = path.resolve(MEDIA_FOLDER_PATH);
+  const targetMediaPrefix = targetAdName.replace(/_\\d+$/, '');
+  const todayMediaPrefix = `f_i_o_l_${getTodayMMDD()}`;
+  const mediaPrefixes = [...new Set([targetMediaPrefix, todayMediaPrefix])];
+
+  async function collectUploadFiles(rootPath) {
+    const entries = await fs.readdir(rootPath, { withFileTypes: true });
+    return entries
+      .filter((e) => e.isFile())
+      .map((e) => path.join(rootPath, e.name))
+      .filter((f) => /\.(png|jpe?g|webp|gif)$/i.test(f));
+  }
+
+  async function findDatedMediaFolder() {
+    const entries = await fs.readdir(mediaRoot, { withFileTypes: true });
+    for (const prefix of mediaPrefixes) {
+      const exact = entries.find((e) => e.isDirectory() && e.name === prefix);
+      if (exact) return path.join(mediaRoot, exact.name);
+
+      const partial = entries.find((e) => e.isDirectory() && e.name.includes(prefix));
+      if (partial) return path.join(mediaRoot, partial.name);
+    }
+    return null;
+  }
+
+  const datedFolder = await findDatedMediaFolder();
+  const uploadFolder = datedFolder || mediaRoot;
+  const files = await collectUploadFiles(uploadFolder);
+
+  if (!files.length) {
+    throw new Error(`업로드 가능한 이미지 파일이 없습니다: ${uploadFolder} (검색 prefix: ${mediaPrefixes.join(', ')})`);
+  }
+
+  console.log('[STEP] 업로드 이미지 폴더 선택:', {
+    mediaRoot,
+    uploadFolder,
+    targetAdName,
+    mediaPrefixes,
+    fileCount: files.length,
+  });
 
   await selectImageAdModeWithRequestedClasses(page);
 
-  const imageAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: /^이미지 광고$/ }).first();
-  if (await imageAdTab.isVisible({ timeout: 8000 }).catch(() => false)) {
-    await page.waitForTimeout(3000);
-    await imageAdTab.click({ force: true }).catch(() => null);
-    await page.waitForTimeout(3000);
+  const presentationArea = page
+    .locator('div[role="presentation"].x3nfvp2.x120ccyz.x1heor9g.x2lah0s.x1c4vz4f')
+    .first();
+
+  const presentationVisible = await presentationArea.isVisible({ timeout: 20000 }).catch(() => false);
+  console.log('[DEBUG] 이미지 광고 presentation 영역 표시:', { presentationVisible });
+  if (presentationVisible) {
+    await presentationArea.scrollIntoViewIfNeeded().catch(() => null);
+    await page.waitForTimeout(1500);
   }
 
-  const uploadButton = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli').filter({ hasText: /^업로드$/ }).first();
-  if (await uploadButton.isVisible({ timeout: 10000 }).catch(() => false)) {
-    await uploadButton.click({ force: true }).catch(async () => {
-      const box = await uploadButton.boundingBox();
-      if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    });
-    await page.waitForTimeout(5000);
+  const uploadButton = page
+    .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
+    .filter({ hasText: /^업로드$/ })
+    .first()
+    .or(page.getByRole('button', { name: /^업로드$/ }).first())
+    .or(page.getByText(/^업로드$/).first());
+
+  await uploadButton.waitFor({ state: 'visible', timeout: 30000 });
+  await uploadButton.scrollIntoViewIfNeeded().catch(() => null);
+  await page.waitForTimeout(1500);
+
+  const uploadBox = await uploadButton.boundingBox().catch(() => null);
+  console.log('[DEBUG] 업로드 버튼 box:', uploadBox);
+
+  const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 10000 }).catch(() => null);
+  await uploadButton.click({ force: true }).catch(async () => {
+    if (uploadBox) await page.mouse.click(uploadBox.x + uploadBox.width / 2, uploadBox.y + uploadBox.height / 2);
+  });
+
+  const fileChooser = await fileChooserPromise;
+  if (fileChooser) {
+    await fileChooser.setFiles(files);
+  } else {
+    const fileInput = page.locator('input[type="file"]').first();
+    await fileInput.waitFor({ timeout: 30000 });
+    await fileInput.setInputFiles(files);
   }
 
-  const fileInput = page.locator('input[type="file"]').first();
-  await fileInput.waitFor({ timeout: 30000 });
-  await fileInput.setInputFiles(files);
   await page.waitForTimeout(7000);
+  console.log('[STEP] 날짜 폴더 이미지 전체 업로드 완료:', {
+    uploadFolder,
+    fileCount: files.length,
+  });
 
   const mediaSearch = page.locator('input[placeholder="미디어 검색"]').first();
   if (await mediaSearch.isVisible({ timeout: 10000 }).catch(() => false)) {
     await mediaSearch.click({ force: true });
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
     await page.keyboard.press('Backspace');
-    await page.keyboard.type(targetAdName, { delay: 40 });
+    await page.keyboard.type(targetMediaPrefix, { delay: 40 });
     await page.waitForTimeout(5000);
-    console.log('[STEP] 업로드 후 미디어 검색:', { targetAdName });
+    console.log('[STEP] 업로드 후 미디어 검색:', { targetMediaPrefix });
   }
 }
-
-
 
 async function fillLandingUrlOnly(page, targetAdName) {
   const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${targetAdName}`;
