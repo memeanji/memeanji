@@ -845,14 +845,19 @@ async function clickContinueButtonOnly(page) {
 
 async function waitForBudgetStrategyReady(page) {
   const budgetAmountInput = page.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value="20,000"], input[type="text"][value*=","]').first();
+  const requestedBudgetStrategyClass = page
+    .locator('div.x1vvvo52.x1fvot60.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.x117nqv4.xeuugli')
+    .filter({ hasText: /예산\s*전략|일일\s*예산|예산/ })
+    .first();
   const budgetStrategyText = page.getByText(/예산\s*및\s*일정|예산\s*전략|일일\s*예산|daily budget|budget strategy/i).first();
 
   for (let attempt = 1; attempt <= 8; attempt += 1) {
     const inputVisible = await budgetAmountInput.isVisible({ timeout: 1000 }).catch(() => false);
+    const classVisible = await requestedBudgetStrategyClass.isVisible({ timeout: 1000 }).catch(() => false);
     const strategyVisible = await budgetStrategyText.isVisible({ timeout: 1000 }).catch(() => false);
-    console.log('[DEBUG] 예산 전략/금액 input 대기:', { attempt, inputVisible, strategyVisible });
+    console.log('[DEBUG] 예산 전략/금액 input 대기:', { attempt, inputVisible, classVisible, strategyVisible });
 
-    if (inputVisible || strategyVisible) {
+    if (inputVisible || classVisible || strategyVisible) {
       await page.waitForTimeout(3000);
       return true;
     }
@@ -1977,15 +1982,15 @@ async function runFlow(page) {
 
     await fillAdsetNameInAdsetModalOnly(page, adsetName);
 
-    if (ADSET_DAILY_BUDGET) {
-      await pause(page, '일 예산 입력 전 대기', 4000);
-      await fillAdsetBudgetInModalOnly(page, ADSET_DAILY_BUDGET);
-      await pause(page, '일 예산 입력 후 스케줄링 전 대기', 5000);
-    }
-
     const scheduleReady = await updateDateAndTimeBeforeContinue(page);
     if (!scheduleReady) {
       throw new Error('스케줄링 영역 확인 실패: 날짜 input을 찾지 못했습니다.');
+    }
+
+    if (ADSET_DAILY_BUDGET) {
+      await pause(page, '스케줄링 후 예산 전략 탐색 전 대기', 3000);
+      await fillAdsetBudgetInModalOnly(page, ADSET_DAILY_BUDGET);
+      await pause(page, '예산 입력 후 복제 설정 전 대기', 3000);
     }
 
     const adCreativeDuplicateCount = Math.max(AD_CREATIVE_COUNT, 0);
