@@ -1090,85 +1090,155 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
     fileCount: files.length,
   });
 
-  const mediaSearch = page.locator('input[placeholder="미디어 검색"]').first();
-  if (await mediaSearch.isVisible({ timeout: 10000 }).catch(() => false)) {
-    await mediaSearch.click({ force: true });
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-    await page.keyboard.press('Backspace');
-    await page.keyboard.type(targetFolderName, { delay: 40 });
-    await page.waitForTimeout(5000);
-    console.log('[STEP] 업로드 후 미디어 검색:', { targetFolderName });
-  }
+  await searchAndSelectExistingMedia(page, targetAdName);
 }
 
 async function searchAndSelectExistingMedia(page, targetAdName) {
-  const targetFolderName = targetAdName.replace(/_\d+$/, '');
-  const searchTerms = [...new Set([targetAdName, targetFolderName])];
   const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const exactNameRegex = new RegExp(`^${escapeRegex(targetAdName)}(\\.[a-z0-9]+)?$`, 'i');
+  const looseNameRegex = new RegExp(escapeRegex(targetAdName), 'i');
 
-  console.log('[STEP] 기존 업로드 이미지 검색/선택 시작:', { targetAdName, searchTerms });
+  console.log('[STEP] 정확한 업로드 이미지 검색/선택 시작:', { targetAdName });
 
   const mediaSearch = page
     .locator('input[placeholder="미디어 검색"], input[placeholder*="미디어"], input[type="search"]')
     .first();
 
   await mediaSearch.waitFor({ state: 'visible', timeout: 60000 });
+  await mediaSearch.click({ force: true });
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type(targetAdName, { delay: 40 });
+  await page.waitForTimeout(5000);
+  console.log('[STEP] 기존 미디어 정확 검색어 입력:', { targetAdName });
 
-  for (const searchTerm of searchTerms) {
-    await mediaSearch.click({ force: true });
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-    await page.keyboard.press('Backspace');
-    await page.keyboard.type(searchTerm, { delay: 40 });
-    await page.waitForTimeout(5000);
-    console.log('[STEP] 기존 미디어 검색어 입력:', { searchTerm });
+  const selectableCandidates = [
+    {
+      name: 'exact aria-label/title button',
+      locator: page
+        .locator('[role="button"], [role="checkbox"], label, div')
+        .filter({ hasText: exactNameRegex })
+        .first(),
+    },
+    {
+      name: 'exact image alt',
+      locator: page.locator(`img[alt="${targetAdName}"], img[alt="${targetAdName}.jpg"], img[alt="${targetAdName}.jpeg"], img[alt="${targetAdName}.png"], img[alt="${targetAdName}.webp"]`).first(),
+    },
+    {
+      name: 'loose target media tile',
+      locator: page.locator('[role="button"], [role="checkbox"], label, div').filter({ hasText: looseNameRegex }).first(),
+    },
+    {
+      name: 'first unchecked checkbox after exact search',
+      locator: page.locator('[role="checkbox"][aria-checked="false"]').first(),
+    },
+    {
+      name: 'first radio/checkbox input after exact search',
+      locator: page.locator('input[type="checkbox"], input[type="radio"], [role="checkbox"]').first(),
+    },
+  ];
 
-    const selectableCandidates = [
-      {
-        name: 'unchecked checkbox',
-        locator: page.locator('[role="checkbox"][aria-checked="false"]').first(),
-      },
-      {
-        name: 'any checkbox',
-        locator: page.locator('[role="checkbox"]').first(),
-      },
-      {
-        name: 'search term image',
-        locator: page
-          .locator('img')
-          .filter({ hasText: new RegExp(escapeRegex(searchTerm)) })
-          .first(),
-      },
-      {
-        name: 'visible image',
-        locator: page.locator('img').first(),
-      },
-      {
-        name: 'media tile button',
-        locator: page.locator('[role="button"]').filter({ hasText: new RegExp(escapeRegex(searchTerm)) }).first(),
-      },
-    ];
+  for (const candidate of selectableCandidates) {
+    const visible = await candidate.locator.isVisible({ timeout: 3000 }).catch(() => false);
+    if (!visible) continue;
 
-    for (const candidate of selectableCandidates) {
-      const visible = await candidate.locator.isVisible({ timeout: 2000 }).catch(() => false);
-      if (!visible) continue;
+    await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
+    await page.waitForTimeout(700);
+    const box = await candidate.locator.boundingBox().catch(() => null);
+    console.log('[DEBUG] 정확 미디어 선택 후보:', { targetAdName, name: candidate.name, box });
+    if (!box) continue;
 
-      await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
-      await page.waitForTimeout(700);
-      const box = await candidate.locator.boundingBox().catch(() => null);
-      console.log('[DEBUG] 기존 미디어 선택 후보:', { searchTerm, name: candidate.name, box });
-      if (!box) continue;
-
-      await candidate.locator.click({ force: true }).catch(async () => {
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-      });
-      await page.waitForTimeout(3000);
-      console.log('[STEP] 기존 업로드 이미지 선택 완료:', { searchTerm, candidate: candidate.name });
-      return;
-    }
+    await candidate.locator.click({ force: true }).catch(async () => {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    });
+    await page.waitForTimeout(3000);
+    console.log('[STEP] 정확히 일치하는 업로드 이미지 선택 완료:', { targetAdName, candidate: candidate.name });
+    await completeMediaPickerNextAndOriginalFlow(page);
+    return;
   }
 
   await debugDump(page, 'existing media not selected');
-  throw new Error(`기존 업로드 이미지 검색/선택 실패: ${targetAdName}`);
+  throw new Error(`정확히 일치하는 기존 업로드 이미지 검색/선택 실패: ${targetAdName}`);
+}
+
+async function clickMediaPickerNextButton(page, attemptLabel) {
+  const nextCandidates = [
+    {
+      name: 'ads omp primary data-surface',
+      locator: page
+        .locator('div[role="button"][aria-busy="false"][data-surface*="ads-omp-primary-button"]')
+        .filter({ hasText: /^다음$/ })
+        .first(),
+    },
+    {
+      name: 'role button next',
+      locator: page.getByRole('button', { name: /^다음$/ }).first(),
+    },
+    {
+      name: 'next text div',
+      locator: page
+        .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
+        .filter({ hasText: /^다음$/ })
+        .first(),
+    },
+  ];
+
+  for (const candidate of nextCandidates) {
+    const visible = await candidate.locator.isVisible({ timeout: 2500 }).catch(() => false);
+    if (!visible) continue;
+
+    await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
+    await page.waitForTimeout(700);
+    const box = await candidate.locator.boundingBox().catch(() => null);
+    console.log('[DEBUG] 다음 버튼 후보:', { attemptLabel, name: candidate.name, box });
+    if (!box) continue;
+
+    await candidate.locator.click({ force: true }).catch(async () => {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    });
+    await page.waitForTimeout(4000);
+    console.log('[STEP] 미디어 선택 다음 버튼 클릭 완료:', { attemptLabel, candidate: candidate.name });
+    return true;
+  }
+
+  return false;
+}
+
+async function selectAllOriginalRadios(page) {
+  let selectedCount = 0;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const originalRadios = await page.locator('input[type="radio"][value="original"][aria-checked="false"], input[type="radio"][value="original"]:not(:checked)').elementHandles().catch(() => []);
+    if (!originalRadios.length) break;
+
+    for (const radio of originalRadios) {
+      const visible = await radio.isVisible().catch(() => false);
+      if (!visible) continue;
+      const box = await radio.boundingBox().catch(() => null);
+      if (!box) continue;
+      await radio.click({ force: true }).catch(async () => {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+      selectedCount += 1;
+      await page.waitForTimeout(500);
+    }
+  }
+  console.log('[STEP] 원본(original) 라디오 선택 완료:', { selectedCount });
+  return selectedCount;
+}
+
+async function completeMediaPickerNextAndOriginalFlow(page) {
+  await clickMediaPickerNextButton(page, 'after-media-select');
+
+  for (let step = 1; step <= 5; step += 1) {
+    await page.waitForTimeout(2000);
+    await selectAllOriginalRadios(page);
+
+    const clickedNext = await clickMediaPickerNextButton(page, `post-original-${step}`);
+    if (!clickedNext) {
+      console.log('[STEP] 더 이상 미디어 선택 다음 버튼 없음 - 후속 단계 완료:', { step });
+      return;
+    }
+  }
 }
 
 async function fillLandingUrlOnly(page, targetAdName) {
