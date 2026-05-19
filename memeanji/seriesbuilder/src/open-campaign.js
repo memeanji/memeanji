@@ -1301,6 +1301,55 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
     return;
   }
 
+  console.log('[WARN] 고립된 정확 파일명 카드를 찾지 못함 - 정확 검색 결과의 오늘 업로드 후보를 선택합니다:', { targetAdName });
+  const fallbackCandidates = [
+    {
+      name: 'first unchecked result checkbox',
+      locator: page.locator('[role="checkbox"][aria-checked="false"]').first(),
+    },
+    {
+      name: 'first unchecked input checkbox',
+      locator: page.locator('input[type="checkbox"][aria-checked="false"], input[type="checkbox"]:not(:checked)').first(),
+    },
+    {
+      name: 'first visible media image parent',
+      locator: page.locator('img').first(),
+    },
+    {
+      name: 'first media result button',
+      locator: page.locator('[role="button"]').filter({ hasNotText: /^다음$|^완료$|^업로드$/ }).first(),
+    },
+  ];
+
+  for (const candidate of fallbackCandidates) {
+    const visible = await candidate.locator.isVisible({ timeout: 3000 }).catch(() => false);
+    if (!visible) continue;
+
+    await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
+    await page.waitForTimeout(700);
+    const box = await candidate.locator.boundingBox().catch(() => null);
+    console.log('[DEBUG] 오늘 업로드 이미지 fallback 선택 후보:', { targetAdName, name: candidate.name, box });
+    if (!box) continue;
+
+    const clickableHandle = await candidate.locator.evaluateHandle((el) => (
+      el.closest('[role="checkbox"], label, [role="button"]') || el
+    )).catch(() => null);
+    const clickable = clickableHandle?.asElement?.() || await candidate.locator.elementHandle().catch(() => null);
+
+    if (clickable) {
+      await clickable.click({ force: true }).catch(async () => {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+    } else {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    }
+
+    await page.waitForTimeout(3000);
+    console.log('[STEP] 오늘 업로드 이미지 fallback 선택 완료:', { targetAdName, candidate: candidate.name });
+    await completeMediaPickerNextAndOriginalFlow(page);
+    return;
+  }
+
   console.log('[DEBUG] 정확 파일명 매칭 실패 - 검사한 값 샘플:', inspected.slice(0, 20));
   await debugDump(page, 'existing media not selected');
   throw new Error(`정확히 일치하는 기존 업로드 이미지 검색/선택 실패: ${targetAdName}`);
