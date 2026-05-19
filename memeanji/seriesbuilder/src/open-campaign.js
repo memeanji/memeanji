@@ -64,6 +64,12 @@ function getLandingCampaignName(adName) {
   return String(adName).replace(/_(\d+)$/, (_, index) => `_${Number(index)}`);
 }
 
+function formatBudgetValue(value) {
+  const digits = String(value || '').replace(/[^\d]/g, '');
+  if (!digits) return '';
+  return Number(digits).toLocaleString('en-US');
+}
+
 
 function parseScheduleTime(value) {
   const m = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
@@ -838,6 +844,12 @@ async function clickContinueButtonOnly(page) {
 
 
 async function fillAdsetBudgetInModalOnly(page, budgetValue) {
+  const formattedBudget = formatBudgetValue(budgetValue);
+  if (!formattedBudget) {
+    console.log('[STEP] 예산 값이 비어 있어 예산 입력을 건너뜁니다:', { budgetValue });
+    return;
+  }
+
   const modalRoot = page.locator('[role="dialog"]').filter({ has: page.getByText(/광고 세트|ad set/i) }).first();
   const modalVisible = await modalRoot.isVisible({ timeout: 3000 }).catch(() => false);
 
@@ -845,12 +857,12 @@ async function fillAdsetBudgetInModalOnly(page, budgetValue) {
     ? modalRoot
       .getByLabel(/일일 예산|예산|daily budget|budget/i)
       .or(modalRoot.getByPlaceholder(/예산|budget|금액을 입력하세요/i))
-      .or(modalRoot.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value*=","]'))
+      .or(modalRoot.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value="20,000"], input[type="text"][value*=","]'))
       .or(modalRoot.locator('input[type="text"]').filter({ hasNot: modalRoot.locator('[type="checkbox"], [role="switch"]') }).first())
     : page
       .getByLabel(/일일 예산|예산|daily budget|budget/i)
       .or(page.getByPlaceholder(/예산|budget|금액을 입력하세요/i))
-      .or(page.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value*=","]'));
+      .or(page.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value="20,000"], input[type="text"][value*=","]'));
 
   const budgetEl = budgetInput.first();
   const budgetVisible = await budgetEl.isVisible({ timeout: 5000 }).catch(() => false);
@@ -862,9 +874,30 @@ async function fillAdsetBudgetInModalOnly(page, budgetValue) {
       return;
     }
 
-    console.log(`[STEP] 예산 입력: ${budgetValue}`);
+    console.log('[STEP] 예산 입력:', { budgetValue, formattedBudget });
     await budgetEl.click({ force: true }).catch(() => null);
-    await budgetEl.fill(String(budgetValue)).catch(() => null);
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type(formattedBudget, { delay: 40 });
+    await page.waitForTimeout(1500);
+
+    let actualValue = await budgetEl.inputValue().catch(() => '');
+    if (actualValue !== formattedBudget) {
+      console.log('[WARN] 예산 키보드 입력 확인 실패 - DOM value 직접 변경 fallback:', { expected: formattedBudget, actualValue });
+      await budgetEl.evaluate((el, value) => {
+        el.focus();
+        el.value = value;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }, formattedBudget);
+      await page.waitForTimeout(1500);
+      actualValue = await budgetEl.inputValue().catch(() => '');
+    }
+
+    console.log('[DEBUG] 예산 입력 확인:', { expected: formattedBudget, actualValue });
+    if (actualValue !== formattedBudget) {
+      throw new Error(`예산 입력 실패: expected=${formattedBudget}, actual=${actualValue}`);
+    }
   } else {
     console.log('[STEP] 예산 입력창 미감지 - 건너뜀');
   }
