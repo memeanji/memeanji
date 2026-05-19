@@ -1722,6 +1722,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
   let adCreativeIndex = 1;
   const adsetEndIndex = adsetStartIndex + adsetCount - 1;
   const maxCreativeTotal = adsetCount * adCreativeCount;
+  const processedAdsetRows = new Set();
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     await page.waitForTimeout(5000);
@@ -1739,14 +1740,31 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const rowBox = await row.boundingBox().catch(() => null);
       if (!rowBox) continue;
 
-      const isAdsetCopy = (rowText.includes('광고세트') && rowText.includes('사본')) || /리타겟\s*\d+번\s*광고세트/.test(rowText);
+      const rowId = await row
+        .evaluate((el) => el.getAttribute('data-id') || el.id || el.querySelector('[data-id]')?.getAttribute('data-id') || '')
+        .catch(() => '');
+      const rowKey = rowId || `${Math.round(rowBox.x)}:${Math.round(rowBox.y)}:${rowText.slice(0, 80)}`;
+      const targetAdsetName = adsetIndex <= adsetEndIndex ? getAdsetName(adsetIndex) : '';
+      const isAlreadyTargetAdset = targetAdsetName && normalizeText(rowText).includes(normalizeText(targetAdsetName));
+      const isAdsetCopy = rowText.includes('광고세트') && rowText.includes('사본');
       const isAdCopy = rowText.includes('새 판매 광고') || rowText.includes('광고 - 사본') || rowText.includes('광고명');
+
+      if (processedAdsetRows.has(rowKey) && (rowText.includes('광고세트') || rowText.includes(ADSET_BASE_NAME))) {
+        console.log('[DEBUG] 이미 처리한 광고세트 row 건너뜀:', { rowKey, rowText: rowText.slice(0, 120) });
+        continue;
+      }
+
+      if (isAlreadyTargetAdset && adsetIndex <= adsetEndIndex) {
+        processedAdsetRows.add(rowKey);
+        console.log('[STEP] 광고세트명 이미 변경됨 - 다음 광고세트로 이동:', { targetAdsetName, rowKey });
+        adsetIndex += 1;
+        continue;
+      }
 
       if (isAdsetCopy && adsetIndex <= adsetEndIndex) {
         await page.mouse.click(rowBox.x + rowBox.width / 2, rowBox.y + rowBox.height / 2);
         await page.waitForTimeout(7000);
 
-        const targetAdsetName = getAdsetName(adsetIndex);
         const adsetInput = page.locator('input[placeholder="여기에 광고 세트 이름을 입력하세요..."], input[placeholder="광고 세트 이름 지정"]').first();
         const visible = await adsetInput.isVisible({ timeout: 5000 }).catch(() => false);
         if (visible) {
@@ -1756,6 +1774,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           await page.keyboard.type(targetAdsetName, { delay: 60 });
           await page.waitForTimeout(5000);
           console.log('[STEP] 광고세트명 변경:', { targetAdsetName });
+          processedAdsetRows.add(rowKey);
           adsetIndex += 1;
         }
         continue;
