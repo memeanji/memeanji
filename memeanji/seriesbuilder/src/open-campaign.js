@@ -1000,27 +1000,29 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
     fileCount: files.length,
   });
 
-  await selectImageAdModeWithRequestedClasses(page);
+  console.log('[STEP] 이미지 광고 내부 - 업로드 버튼 탐색 시작');
 
   const presentationArea = page
     .locator('div[role="presentation"].x3nfvp2.x120ccyz.x1heor9g.x2lah0s.x1c4vz4f')
     .first();
 
-  const presentationVisible = await presentationArea.isVisible({ timeout: 20000 }).catch(() => false);
+  const presentationVisible = await presentationArea.isVisible({ timeout: 30000 }).catch(() => false);
   console.log('[DEBUG] 이미지 광고 presentation 영역 표시:', { presentationVisible });
   if (presentationVisible) {
     await presentationArea.scrollIntoViewIfNeeded().catch(() => null);
     await page.waitForTimeout(1500);
   }
 
-  const uploadButton = page
+  const exactUploadButton = page
     .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
     .filter({ hasText: /^업로드$/ })
-    .first()
+    .first();
+
+  const uploadButton = exactUploadButton
     .or(page.getByRole('button', { name: /^업로드$/ }).first())
     .or(page.getByText(/^업로드$/).first());
 
-  await uploadButton.waitFor({ state: 'visible', timeout: 30000 });
+  await uploadButton.waitFor({ state: 'visible', timeout: 60000 });
   await uploadButton.scrollIntoViewIfNeeded().catch(() => null);
   await page.waitForTimeout(1500);
 
