@@ -1,7 +1,7 @@
 {
-  "name": "meta-ads-playwright-automation",
-  "version": "1.0.0",
-  "description": "Playwright + Node.js automation for opening a campaign in Meta Ads Manager",
+  "name": "meta-automation-season-2",
+  "version": "2.0.0",
+  "description": "meta 자동화 시즌 2 - Playwright + Node.js automation for Meta Ads Manager campaign workflows",
   "type": "module",
   "scripts": {
     "login": "node src/login.js",
