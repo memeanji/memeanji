@@ -843,6 +843,26 @@ async function clickContinueButtonOnly(page) {
 }
 
 
+async function waitForBudgetStrategyReady(page) {
+  const budgetAmountInput = page.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value="20,000"], input[type="text"][value*=","]').first();
+  const budgetStrategyText = page.getByText(/예산\s*및\s*일정|예산\s*전략|일일\s*예산|daily budget|budget strategy/i).first();
+
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const inputVisible = await budgetAmountInput.isVisible({ timeout: 1000 }).catch(() => false);
+    const strategyVisible = await budgetStrategyText.isVisible({ timeout: 1000 }).catch(() => false);
+    console.log('[DEBUG] 예산 전략/금액 input 대기:', { attempt, inputVisible, strategyVisible });
+
+    if (inputVisible || strategyVisible) {
+      await page.waitForTimeout(3000);
+      return true;
+    }
+
+    await page.waitForTimeout(1500);
+  }
+
+  return false;
+}
+
 async function fillAdsetBudgetInModalOnly(page, budgetValue) {
   const formattedBudget = formatBudgetValue(budgetValue);
   if (!formattedBudget) {
@@ -850,22 +870,26 @@ async function fillAdsetBudgetInModalOnly(page, budgetValue) {
     return;
   }
 
+  await waitForBudgetStrategyReady(page);
+
   const modalRoot = page.locator('[role="dialog"]').filter({ has: page.getByText(/광고 세트|ad set/i) }).first();
   const modalVisible = await modalRoot.isVisible({ timeout: 3000 }).catch(() => false);
 
+  const budgetInputSelector = 'input[placeholder="금액을 입력하세요"], input[type="text"][value="20,000"], input[type="text"][value*=","]';
   const budgetInput = modalVisible
     ? modalRoot
-      .getByLabel(/일일 예산|예산|daily budget|budget/i)
+      .locator(budgetInputSelector)
+      .or(modalRoot.getByLabel(/일일 예산|예산|daily budget|budget/i))
       .or(modalRoot.getByPlaceholder(/예산|budget|금액을 입력하세요/i))
-      .or(modalRoot.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value="20,000"], input[type="text"][value*=","]'))
       .or(modalRoot.locator('input[type="text"]').filter({ hasNot: modalRoot.locator('[type="checkbox"], [role="switch"]') }).first())
     : page
-      .getByLabel(/일일 예산|예산|daily budget|budget/i)
+      .locator(budgetInputSelector)
+      .or(page.getByLabel(/일일 예산|예산|daily budget|budget/i))
       .or(page.getByPlaceholder(/예산|budget|금액을 입력하세요/i))
-      .or(page.locator('input[placeholder="금액을 입력하세요"], input[type="text"][value="20,000"], input[type="text"][value*=","]'));
+      .or(page.locator('input[type="text"]').filter({ hasNot: page.locator('[type="checkbox"], [role="switch"]') }).first());
 
   const budgetEl = budgetInput.first();
-  const budgetVisible = await budgetEl.isVisible({ timeout: 5000 }).catch(() => false);
+  const budgetVisible = await budgetEl.isVisible({ timeout: 15000 }).catch(() => false);
 
   if (budgetVisible) {
     const disabled = await budgetEl.getAttribute('aria-disabled').catch(() => null);
