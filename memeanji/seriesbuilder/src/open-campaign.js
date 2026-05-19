@@ -2016,8 +2016,9 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
   let adsetIndex = adsetStartIndex;
   let adCreativeIndex = 1;
   const effectiveAdsetCount = adsetCount + 1;
+  const effectiveCreativeCount = adCreativeCount + 1;
   const adsetEndIndex = adsetStartIndex + effectiveAdsetCount - 1;
-  const maxCreativeTotal = effectiveAdsetCount * adCreativeCount;
+  const maxCreativeTotal = effectiveAdsetCount * effectiveCreativeCount;
   const totalRenameTarget = effectiveAdsetCount + maxCreativeTotal;
   const maxRenameAttempts = Math.max(20, totalRenameTarget * 4);
   const processedAdsetRows = new Set();
@@ -2141,6 +2142,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       maxCreativeTotal,
       effectiveAdsetCount,
       adCreativeCount,
+      effectiveCreativeCount,
       totalRenameTarget,
     });
 
