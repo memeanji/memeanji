@@ -782,45 +782,87 @@ async function enterAdsetFlow(page) {
 
 async function selectImageAdModeWithRequestedClasses(page) {
   console.log('[STEP] 이미지 광고 선택 단계 시작');
-  const wrapper = page.locator('div.x6s0dn4.x1q0g3np.xozqiw3.x2lwn1j.x1iyjqo2.xs83m0k.x1xsc7gk.x78zum5.xeuugli').first();
-  await wrapper.waitFor({ state: 'visible', timeout: 60000 });
-  await page.waitForTimeout(3000);
 
-  const imageLabel = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: /^이미지 광고$/ }).first();
+  const surfaceWrapper = page.locator('span[data-surface-wrapper="1"]').first();
+  if (await surfaceWrapper.isVisible({ timeout: 2000 }).catch(() => false)) {
+    console.log('[STEP] 이미지 광고 화면 이미 진입 확인');
+    return;
+  }
 
-  let clicked = false;
-  for (let attempt = 1; attempt <= 10 && !clicked; attempt += 1) {
-    console.log(`[STEP] 이미지 광고 클릭 시도 ${attempt}/10`);
-    const visible = await imageLabel.isVisible({ timeout: 5000 }).catch(() => false);
-    if (visible) {
-      await page.waitForTimeout(3000);
-      await imageLabel.click({ force: true }).then(() => { clicked = true; }).catch(async () => {
-        const box = await imageLabel.boundingBox();
+  const requestedWrapper = page
+    .locator('div.x6s0dn4.x1q0g3np.xozqiw3.x2lwn1j.x1iyjqo2.xs83m0k.x1xsc7gk.x78zum5.xeuugli')
+    .filter({ hasText: /이미지 광고/ })
+    .first();
+
+  const requestedLabel = page
+    .locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2')
+    .filter({ hasText: /^이미지 광고$/ })
+    .first();
+
+  const candidates = [
+    { name: 'requested wrapper row', locator: requestedWrapper },
+    { name: 'requested image label', locator: requestedLabel },
+    {
+      name: 'menuitem data-surface',
+      locator: page
+        .locator('div[role="menuitem"][data-surface*="browse-image-library-dropdown-item"]')
+        .filter({ hasText: /이미지 광고/ })
+        .first(),
+    },
+    {
+      name: 'role menuitem text',
+      locator: page.getByRole('menuitem', { name: /이미지 광고/ }).first(),
+    },
+    {
+      name: 'role button text',
+      locator: page.getByRole('button', { name: /이미지 광고/ }).first(),
+    },
+    {
+      name: 'plain text',
+      locator: page.getByText(/^이미지 광고$/).first(),
+    },
+  ];
+
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    console.log(`[STEP] 이미지 광고 클릭 시도 ${attempt}/12`);
+
+    const wrapperVisible = await requestedWrapper.isVisible({ timeout: 3000 }).catch(() => false);
+    const labelVisible = await requestedLabel.isVisible({ timeout: 3000 }).catch(() => false);
+    console.log('[DEBUG] 이미지 광고 후보 표시 상태:', { attempt, wrapperVisible, labelVisible });
+
+    for (const candidate of candidates) {
+      const visible = await candidate.locator.isVisible({ timeout: 1500 }).catch(() => false);
+      if (!visible) continue;
+
+      await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
+      await page.waitForTimeout(1000);
+
+      const box = await candidate.locator.boundingBox().catch(() => null);
+      console.log('[DEBUG] 이미지 광고 클릭 후보:', { attempt, name: candidate.name, box });
+
+      await candidate.locator.click({ force: true }).catch(async () => {
         if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       });
-    }
 
-    if (!clicked) {
-      const menuitem = page.locator('div[role="menuitem"][data-surface*="browse-image-library-dropdown-item"]').filter({ hasText: /이미지 광고/ }).first();
-      const miVisible = await menuitem.isVisible({ timeout: 2000 }).catch(() => false);
-      if (miVisible) {
-        await menuitem.click({ force: true }).then(() => { clicked = true; }).catch(() => null);
+      await page.waitForTimeout(4000);
+      const entered = await surfaceWrapper.isVisible({ timeout: 3000 }).catch(() => false);
+      console.log('[DEBUG] 이미지 광고 진입 확인(span[data-surface-wrapper="1"]):', {
+        attempt,
+        candidate: candidate.name,
+        entered,
+      });
+
+      if (entered) {
+        console.log('[STEP] 이미지 광고 진입 성공');
+        return;
       }
     }
 
     await page.waitForTimeout(4000);
-    const surfaceWrapper = await page.locator('span[data-surface-wrapper="1"]').first().isVisible({ timeout: 2000 }).catch(() => false);
-    console.log('[DEBUG] 이미지 광고 진입 확인(span[data-surface-wrapper="1"]):', { attempt, surfaceWrapper });
-    if (surfaceWrapper) {
-      clicked = true;
-      break;
-    }
   }
 
-  if (!clicked) {
-    await debugDump(page, 'image ad click did not navigate to surface wrapper');
-    throw new Error('이미지 광고 클릭 후 다음 단계 진입 실패');
-  }
+  await debugDump(page, 'image ad click did not navigate to surface wrapper');
+  throw new Error('이미지 광고 버튼을 클릭했지만 다음 단계로 진입하지 못했습니다.');
 }
 
 async function attachMediaFromFolderIfConfigured(page, targetAdName) {
@@ -995,26 +1037,51 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
 
 
 async function enterCreativeInsideEditor(page) {
-  console.log('[STEP] 크리에이티브 내부 진입 시작 (xdj266r -> 수정 버튼)');
+  console.log('[STEP] 크리에이티브 내부 진입 시작 (설정 버튼 -> 이미지 광고)');
 
-  const gate = page.locator('div.xdj266r').first();
-  await gate.waitFor({ state: 'visible', timeout: 30000 });
-  await page.waitForTimeout(3000);
+  const creativeSettings = page
+    .locator('div.x78zum5.xdt5ytf.x2lwn1j.xeuugli.xkh2ocl')
+    .filter({ hasText: /크리에이티브 설정/ })
+    .first()
+    .or(
+      page
+        .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x1iyjqo2')
+        .filter({ hasText: /^크리에이티브 설정$/ })
+        .first(),
+    )
+    .or(page.getByText(/^크리에이티브 설정$/).first());
 
-  const modifyButton = page.locator('div[role="button"].xdj266r').filter({ hasText: /^수정$/ }).first();
-  const visible = await modifyButton.isVisible({ timeout: 15000 }).catch(() => false);
-  if (!visible) {
-    await debugDump(page, 'modify button not found for creative entry');
-    throw new Error('크리에이티브 수정 버튼을 찾지 못했습니다.');
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    console.log(`[STEP] 크리에이티브 설정 버튼 클릭 시도 ${attempt}/10`);
+    const visible = await creativeSettings.isVisible({ timeout: 10000 }).catch(() => false);
+    if (!visible) {
+      console.log(`[WAIT] 크리에이티브 설정 버튼 대기 ${attempt}/10`);
+      await page.waitForTimeout(5000);
+      continue;
+    }
+
+    await creativeSettings.scrollIntoViewIfNeeded().catch(() => null);
+    await page.waitForTimeout(2000);
+    const box = await creativeSettings.boundingBox().catch(() => null);
+    console.log('[DEBUG] 크리에이티브 설정 버튼 box:', box);
+
+    await creativeSettings.click({ force: true }).catch(async () => {
+      if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    });
+    await page.waitForTimeout(6000);
+
+    const imageVisible = await page.getByText(/^이미지 광고$/).first().isVisible({ timeout: 5000 }).catch(() => false);
+    console.log('[DEBUG] 크리에이티브 설정 클릭 후 이미지 광고 표시:', { attempt, imageVisible });
+    if (imageVisible) {
+      await selectImageAdModeWithRequestedClasses(page);
+      await page.waitForTimeout(4000);
+      console.log('[STEP] 크리에이티브 설정 -> 이미지 광고 진입 완료');
+      return;
+    }
   }
 
-  await page.waitForTimeout(3000);
-  await modifyButton.click({ force: true }).catch(async () => {
-    const box = await modifyButton.boundingBox();
-    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  });
-  await page.waitForTimeout(5000);
-  console.log('[STEP] 크리에이티브 수정 버튼 클릭 완료');
+  await debugDump(page, 'creative settings button did not expose image ad button');
+  throw new Error('크리에이티브 설정 버튼 클릭 후 이미지 광고 버튼을 찾지 못했습니다.');
 }
 
 async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCount = 10, adCreativeCount = 5) {
