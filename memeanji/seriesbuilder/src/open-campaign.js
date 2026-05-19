@@ -15,7 +15,7 @@ const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
 const SCHEDULE_TIME = process.env.SCHEDULE_TIME || '05:00';
 const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 const QUICK_TEST_CREATIVE_STEP = String(process.env.QUICK_TEST_CREATIVE_STEP || '').toLowerCase() === 'true';
-const QUICK_TEST_AD_NAME = process.env.QUICK_TEST_AD_NAME || `f_i_o_l_${new Date().getMonth() + 1}${new Date().getDate()}_1`;
+const QUICK_TEST_AD_NAME = process.env.QUICK_TEST_AD_NAME || getAdName(1);
 
 let firstCreativeMediaUploaded = false;
 
@@ -54,6 +54,10 @@ function campaignPatternFromInput(value) {
 function getTodayMMDD() {
   const now = new Date();
   return `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function getAdName(index) {
+  return `f_i_o_l_${getTodayMMDD()}_${String(index).padStart(2, '0')}`;
 }
 
 
@@ -1751,7 +1755,6 @@ async function enterCreativeInsideEditor(page) {
 async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCount = 10, adCreativeCount = 5) {
   console.log('[STEP] 광고세트/광고소재 순차 이름 변경 시작');
 
-  const today = getTodayMMDD();
   let adsetIndex = adsetStartIndex;
   let adCreativeIndex = 1;
   const adsetEndIndex = adsetStartIndex + adsetCount - 1;
@@ -1822,7 +1825,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         const visible = await adNameInput.isVisible({ timeout: 5000 }).catch(() => false);
         if (!visible) continue;
 
-        const targetAdName = `f_i_o_l_${today}_${String(adCreativeIndex)}`;
+        const targetAdName = getAdName(adCreativeIndex);
         await adNameInput.click({ force: true });
         await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
         await page.keyboard.press('Backspace');
