@@ -837,6 +837,17 @@ async function selectImageAdModeWithRequestedClasses(page) {
     .filter({ hasText: /이미지 광고/ })
     .first();
 
+  const presentationArea = page
+    .locator('div[role="presentation"].x3nfvp2.x120ccyz.x1heor9g.x2lah0s.x1c4vz4f')
+    .first();
+
+  const uploadButton = page
+    .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
+    .filter({ hasText: /^업로드$/ })
+    .first()
+    .or(page.getByRole('button', { name: /^업로드$/ }).first())
+    .or(page.getByText(/^업로드$/).first());
+
   const candidates = [
     { name: 'data-auto-logging-id f1a363776', locator: autoLoggingButton },
     { name: 'aria-busy false image ad', locator: ariaReadyButton },
@@ -873,6 +884,8 @@ async function selectImageAdModeWithRequestedClasses(page) {
     const labelVisible = await requestedLabel.isVisible({ timeout: 2000 }).catch(() => false);
     const autoLoggingVisible = await autoLoggingButton.isVisible({ timeout: 1000 }).catch(() => false);
     const ariaReadyVisible = await ariaReadyButton.isVisible({ timeout: 1000 }).catch(() => false);
+    const presentationVisible = await presentationArea.isVisible({ timeout: 1000 }).catch(() => false);
+    const uploadVisible = await uploadButton.isVisible({ timeout: 1000 }).catch(() => false);
     console.log('[DEBUG] 이미지 광고 버튼 후보 표시 상태:', {
       attempt,
       surfaceVisible,
@@ -880,7 +893,14 @@ async function selectImageAdModeWithRequestedClasses(page) {
       labelVisible,
       autoLoggingVisible,
       ariaReadyVisible,
+      presentationVisible,
+      uploadVisible,
     });
+
+    if (surfaceVisible && (presentationVisible || uploadVisible)) {
+      console.log('[STEP] 이미지 광고 내부 진입 확인 - 업로드 버튼 단계로 이동');
+      return;
+    }
 
     for (const candidate of candidates) {
       const visible = await candidate.locator.isVisible({ timeout: 1500 }).catch(() => false);
