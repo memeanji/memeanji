@@ -1147,9 +1147,9 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
   await page.keyboard.press('Backspace');
   await page.keyboard.type(targetAdName, { delay: 40 });
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(8000);
   console.log('[STEP] 기존 미디어 정확 검색어 입력:', { targetAdName });
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(7000);
 
   if (await clickMediaResultByNameSpanAndImage(page, targetAdName)) {
     await completeMediaPickerNextAndOriginalFlow(page);
@@ -1265,7 +1265,7 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
     const clickable = clickableHandle?.asElement?.() || element;
 
     await clickable.scrollIntoViewIfNeeded().catch(() => null);
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(5000);
     const box = await clickable.boundingBox().catch(() => null);
     console.log('[DEBUG] 정확 파일명 일치 미디어 후보:', {
       targetAdName,
@@ -1310,7 +1310,7 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
     if (!visible) continue;
 
     await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(5000);
     const box = await candidate.locator.boundingBox().catch(() => null);
     console.log('[DEBUG] 오늘 업로드 이미지 fallback 선택 후보:', { targetAdName, name: candidate.name, box });
     if (!box) continue;
@@ -1346,15 +1346,15 @@ async function waitForOneMediaSelected(page, targetAdName) {
     .first()
     .or(page.getByText(/1개\s*선택됨/).first());
 
-  for (let attempt = 1; attempt <= 10; attempt += 1) {
-    const selectedVisible = await selectedLabel.isVisible({ timeout: 1000 }).catch(() => false);
+  for (let attempt = 1; attempt <= 15; attempt += 1) {
+    const selectedVisible = await selectedLabel.isVisible({ timeout: 2000 }).catch(() => false);
     const selectedText = selectedVisible ? await selectedLabel.innerText().catch(() => '') : '';
     console.log('[DEBUG] 미디어 1개 선택 확인:', { targetAdName, attempt, selectedVisible, selectedText });
     if (selectedVisible) {
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(5000);
       return true;
     }
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000);
   }
 
   await debugDump(page, 'one media selected label not found');
@@ -1374,7 +1374,7 @@ async function isOneMediaSelected(page) {
 async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
   const nameSpanSelector = 'span.x1vvvo52.xw23nyj.xo1l8bm.x63nzvj.xbsr9hj.xq9mrsl.x1h4wwuj.xeuugli';
   const requestedContainerSelector = 'div.x6s0dn4.x78zum5.xdt5ytf.x1a2a7pz.x13oubkp.x1ypdohk.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8';
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(7000);
 
   const result = await page.evaluate(({ selector, target, containerSelector }) => {
     const visible = (el) => {
@@ -1446,18 +1446,21 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
   if (!result.found || !result.candidate) return false;
 
   const { box } = result.candidate;
+  await page.waitForTimeout(5000);
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(7000);
 
   if (!(await isOneMediaSelected(page))) {
     const rootBox = result.candidate.rootBox;
     if (rootBox) {
+      await page.waitForTimeout(5000);
       await page.mouse.click(rootBox.x + rootBox.width / 2, rootBox.y + rootBox.height / 2);
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(7000);
     }
   }
 
   if (!(await isOneMediaSelected(page))) {
+    await page.waitForTimeout(5000);
     const forced = await page.evaluate(({ selector, target, containerSelector }) => {
       const visible = (el) => {
         if (!el) return false;
@@ -1510,6 +1513,7 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
       containerSelector: requestedContainerSelector,
     }).catch((error) => ({ ok: false, reason: error.message }));
     console.log('[DEBUG] 파일명 span 이미지 DOM 강제 클릭 결과:', { targetAdName, forced });
+    await page.waitForTimeout(7000);
   }
 
   await waitForOneMediaSelected(page, targetAdName);
@@ -1522,7 +1526,7 @@ async function clickMediaCandidateAndVerifySelected(page, locator, targetAdName,
   if (!visible) return false;
 
   await locator.scrollIntoViewIfNeeded().catch(() => null);
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(5000);
   const box = await locator.boundingBox().catch(() => null);
   console.log('[DEBUG] 미디어 명시 후보:', { targetAdName, name, box });
   if (!box) return false;
@@ -1530,6 +1534,7 @@ async function clickMediaCandidateAndVerifySelected(page, locator, targetAdName,
   await locator.click({ force: true }).catch(async () => {
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   });
+  await page.waitForTimeout(7000);
   await waitForOneMediaSelected(page, targetAdName);
   console.log('[STEP] 미디어 명시 후보 선택 완료:', { targetAdName, name });
   return true;
@@ -1571,8 +1576,9 @@ async function clickRightmostMediaTileAndVerifySelected(page, selector, targetAd
     candidateCount: candidates.length,
   });
 
+  await page.waitForTimeout(5000);
   await page.mouse.click(chosen.box.x + chosen.box.width / 2, chosen.box.y + chosen.box.height / 2);
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(7000);
 
   const selectedAfterMouse = await isOneMediaSelected(page);
   if (!selectedAfterMouse) {
@@ -1591,6 +1597,7 @@ async function clickRightmostMediaTileAndVerifySelected(page, selector, targetAd
       };
     }).catch((error) => ({ error: error.message }));
     console.log('[DEBUG] 미디어 타일 DOM 강제 클릭 결과:', { targetAdName, forced });
+    await page.waitForTimeout(7000);
   }
 
   await waitForOneMediaSelected(page, targetAdName);
