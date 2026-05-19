@@ -1166,6 +1166,8 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
 
   console.log('[STEP] 정확한 업로드 이미지 검색/선택 시작:', { targetAdName });
 
+  await openAllMediaViewIfVisible(page);
+
   const mediaSearch = page
     .locator('input[placeholder="미디어 검색"], input[placeholder*="미디어"], input[type="search"]')
     .first();
@@ -1177,6 +1179,15 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   await page.keyboard.type(targetAdName, { delay: 40 });
   await page.waitForTimeout(5000);
   console.log('[STEP] 기존 미디어 정확 검색어 입력:', { targetAdName });
+
+  const explicitImageTile = page
+    .locator('div.x1rdy4ex.x1lxpwgx.x4vbgl9.x165d6jo.xtf92mu.xp5jslt.xcjh6jn.xq2cub4.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x13fuv20.x18b5jzi.x1q0q8m5.x1t7ytsu.xamhcws.x1alpsbp.xlxy82.xyumdvf._32rk._32rg._32rh._32ri._32rj')
+    .first();
+
+  if (await clickMediaCandidateAndVerifySelected(page, explicitImageTile, targetAdName, 'explicit image tile class')) {
+    await completeMediaPickerNextAndOriginalFlow(page);
+    return;
+  }
 
   const mediaElements = await page
     .locator('[role="checkbox"], input[type="checkbox"], [role="button"], label, img')
@@ -1295,7 +1306,7 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
     await clickable.click({ force: true }).catch(async () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
-    await page.waitForTimeout(3000);
+    await waitForOneMediaSelected(page, targetAdName);
     console.log('[STEP] 정확히 일치하는 업로드 이미지 선택 완료:', { targetAdName });
     await completeMediaPickerNextAndOriginalFlow(page);
     return;
@@ -1344,7 +1355,7 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     }
 
-    await page.waitForTimeout(3000);
+    await waitForOneMediaSelected(page, targetAdName);
     console.log('[STEP] 오늘 업로드 이미지 fallback 선택 완료:', { targetAdName, candidate: candidate.name });
     await completeMediaPickerNextAndOriginalFlow(page);
     return;
@@ -1353,6 +1364,69 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   console.log('[DEBUG] 정확 파일명 매칭 실패 - 검사한 값 샘플:', inspected.slice(0, 20));
   await debugDump(page, 'existing media not selected');
   throw new Error(`정확히 일치하는 기존 업로드 이미지 검색/선택 실패: ${targetAdName}`);
+}
+
+async function openAllMediaViewIfVisible(page) {
+  const allView = page
+    .locator('a.xt0psk2.x1hl2dhg.xt0b8zv.x1vvvo52.x1fvot60.xxio538.x1qsmy5i.xq9mrsl.x1yc453h.x1h4wwuj.x1fcty0u')
+    .filter({ hasText: /모두\s*보기/ })
+    .first()
+    .or(page.getByText(/모두\s*보기/).first());
+
+  const visible = await allView.isVisible({ timeout: 5000 }).catch(() => false);
+  if (!visible) {
+    console.log('[STEP] 미디어 모두 보기 링크 미표시 - 현재 화면에서 검색 진행');
+    return false;
+  }
+
+  const box = await allView.boundingBox().catch(() => null);
+  console.log('[DEBUG] 미디어 모두 보기 링크 box:', box);
+  await allView.click({ force: true }).catch(async () => {
+    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  });
+  await page.waitForTimeout(4000);
+  console.log('[STEP] 미디어 모두 보기 진입 완료');
+  return true;
+}
+
+async function waitForOneMediaSelected(page, targetAdName) {
+  const selectedLabel = page
+    .locator('span.x1vvvo52.xw23nyj.x63nzvj.xbsr9hj.xq9mrsl.x1h4wwuj.x117nqv4.xeuugli')
+    .filter({ hasText: /1개\s*선택됨/ })
+    .first()
+    .or(page.getByText(/1개\s*선택됨/).first());
+
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    const selectedVisible = await selectedLabel.isVisible({ timeout: 1000 }).catch(() => false);
+    const checkedVisible = await page.locator('[role="checkbox"][aria-checked="true"], input[type="checkbox"]:checked').first().isVisible({ timeout: 500 }).catch(() => false);
+    console.log('[DEBUG] 미디어 1개 선택 확인:', { targetAdName, attempt, selectedVisible, checkedVisible });
+    if (selectedVisible || checkedVisible) {
+      await page.waitForTimeout(1500);
+      return true;
+    }
+    await page.waitForTimeout(1000);
+  }
+
+  await debugDump(page, 'one media selected label not found');
+  throw new Error(`이미지 선택 후 1개 선택됨 상태를 확인하지 못했습니다: ${targetAdName}`);
+}
+
+async function clickMediaCandidateAndVerifySelected(page, locator, targetAdName, name) {
+  const visible = await locator.isVisible({ timeout: 3000 }).catch(() => false);
+  if (!visible) return false;
+
+  await locator.scrollIntoViewIfNeeded().catch(() => null);
+  await page.waitForTimeout(700);
+  const box = await locator.boundingBox().catch(() => null);
+  console.log('[DEBUG] 미디어 명시 후보:', { targetAdName, name, box });
+  if (!box) return false;
+
+  await locator.click({ force: true }).catch(async () => {
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  });
+  await waitForOneMediaSelected(page, targetAdName);
+  console.log('[STEP] 미디어 명시 후보 선택 완료:', { targetAdName, name });
+  return true;
 }
 
 async function clickMediaPickerButton(page, buttonText, attemptLabel, dataSurfacePart = '') {
