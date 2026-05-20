@@ -2,6 +2,15 @@ import 'dotenv/config';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import {
+  CAMPAIGN_MODES,
+  buildBlogAdsetName,
+  formatDryRunPlan,
+  getBlogAdPlanBySequence,
+  normalizeCampaignMode,
+  parseBoolean,
+  validateCampaignConfig,
+} from './campaign-config.js';
 
 const AD_ACCOUNT_ID = process.env.AD_ACCOUNT_ID;
 const CAMPAIGN_NAME = process.env.CAMPAIGN_NAME;
@@ -14,11 +23,14 @@ const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
 const SCHEDULE_TIME = process.env.SCHEDULE_TIME || '05:00';
 const ADSET_DAILY_BUDGET = String(process.env.ADSET_DAILY_BUDGET || '').trim();
 const AD_FORMAT = normalizeAdFormat(process.env.AD_FORMAT || process.env.AD_CREATIVE_FORMAT || process.env.AD_MEDIA_TYPE || 'image');
+const CAMPAIGN_MODE = normalizeCampaignMode(process.env.CAMPAIGN_MODE);
+const DRY_RUN = parseBoolean(process.env.DRY_RUN);
 const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 const QUICK_TEST_CREATIVE_STEP = String(process.env.QUICK_TEST_CREATIVE_STEP || '').toLowerCase() === 'true';
 const QUICK_TEST_AD_NAME = process.env.QUICK_TEST_AD_NAME || getAdName(1);
 
 let firstCreativeMediaUploaded = false;
+let activeCampaignPlan = null;
 
 const DIRS = {
   screenshots: path.resolve('screenshots'),
@@ -36,12 +48,16 @@ const PATHS = {
 };
 
 function validateEnv() {
-  if (!AD_ACCOUNT_ID) throw new Error('AD_ACCOUNT_ID is missing in .env');
+  if (!DRY_RUN && !AD_ACCOUNT_ID) throw new Error('AD_ACCOUNT_ID is missing in .env');
   if (!CAMPAIGN_NAME) throw new Error('CAMPAIGN_NAME is missing in .env');
   if (!Number.isFinite(ADSET_START_INDEX)) throw new Error('ADSET_START_INDEX must be a number');
   if (!Number.isFinite(ADSET_COUNT) || ADSET_COUNT < 1) throw new Error('ADSET_COUNT must be >= 1');
   if (!Number.isFinite(AD_CREATIVE_COUNT) || AD_CREATIVE_COUNT < 1) throw new Error('AD_CREATIVE_COUNT must be >= 1');
   if (ADSET_DAILY_BUDGET && !/^\d+(\.\d+)?$/.test(ADSET_DAILY_BUDGET)) throw new Error('ADSET_DAILY_BUDGET must be a number');
+}
+
+function isBlogMixedCampaign() {
+  return CAMPAIGN_MODE === CAMPAIGN_MODES.BLOG_MIXED;
 }
 
 function normalizeText(value) {
@@ -1210,10 +1226,10 @@ async function selectVideoAdModeWithRequestedClasses(page) {
   throw new Error('동영상 광고 버튼을 찾거나 클릭하지 못했습니다.');
 }
 
-async function selectCreativeAdModeWithRequestedClasses(page) {
-  const label = getCreativeFormatLabel(AD_FORMAT);
-  console.log('[STEP] creative ad mode selected from env:', { AD_FORMAT, label });
-  if (AD_FORMAT === 'video') {
+async function selectCreativeAdModeWithRequestedClasses(page, adFormat = AD_FORMAT) {
+  const label = getCreativeFormatLabel(adFormat);
+  console.log('[STEP] creative ad mode selected:', { adFormat, label });
+  if (adFormat === 'video') {
     await selectVideoAdModeWithRequestedClasses(page);
     return;
   }
@@ -1221,7 +1237,7 @@ async function selectCreativeAdModeWithRequestedClasses(page) {
   await selectImageAdModeWithRequestedClasses(page);
 }
 
-async function attachMediaFromFolderIfConfigured(page, targetAdName) {
+async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFiles = null, adFormat = AD_FORMAT) {
   const desktopRoot = path.join(process.env.USERPROFILE || process.env.HOME || '.', 'Desktop');
   const targetFolderName = targetAdName.replace(/_\\d+$/, '');
   const todayFolderName = `f_i_o_l_${getTodayMMDD()}`;
@@ -1236,7 +1252,7 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
   }
 
   async function collectUploadFiles(rootPath) {
-    const mediaPattern = AD_FORMAT === 'video'
+    const mediaPattern = adFormat === 'video'
       ? /\.(mp4|mov|m4v|webm)$/i
       : /\.(png|jpe?g|webp|gif)$/i;
 
@@ -1257,21 +1273,23 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
     return null;
   }
 
-  const uploadFolder = await findExactMediaFolder();
+  const uploadFolder = explicitFiles?.length ? path.dirname(explicitFiles[0]) : await findExactMediaFolder();
   if (!uploadFolder) {
     throw new Error(`바탕화면에서 날짜 이미지 폴더를 찾지 못했습니다: ${folderNames.join(', ')}`);
   }
 
-  const files = await collectUploadFiles(uploadFolder);
+  const files = explicitFiles?.length ? explicitFiles : await collectUploadFiles(uploadFolder);
   if (!files.length) {
-    throw new Error(`업로드 가능한 이미지 파일이 없습니다: ${uploadFolder}`);
+    throw new Error(`업로드 가능한 ${adFormat} 파일이 없습니다: ${uploadFolder}`);
   }
 
   console.log('[STEP] 업로드 이미지 폴더 선택:', {
     uploadFolder,
     targetAdName,
+    adFormat,
     folderNames,
     fileCount: files.length,
+    files,
   });
 
   console.log('[STEP] 이미지 광고 내부 - 업로드 버튼 탐색 시작');
@@ -2073,8 +2091,8 @@ async function completeMediaPickerNextAndOriginalFlow(page) {
   console.log('[STEP] 이미지 선택/자르기/문구/생성 완료 흐름 완료');
 }
 
-async function fillLandingUrlOnly(page, targetAdName) {
-  const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(targetAdName)}`;
+async function fillLandingUrlOnly(page, targetAdName, landingUrl = '') {
+  const targetUrl = landingUrl || `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(targetAdName)}`;
 
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     console.log(`[STEP] 랜딩 URL input 탐색 시도 ${attempt}/6`);
@@ -2110,9 +2128,9 @@ async function fillLandingUrlOnly(page, targetAdName) {
   throw new Error('랜딩 URL input을 찾지 못했습니다.');
 }
 
-async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
+async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landingUrl = '', adFormat = AD_FORMAT) {
   const creativeSettings = page.locator('div.x78zum5.xdt5ytf.x2lwn1j.xeuugli.xkh2ocl').filter({ hasText: /크리에이티브 설정/ }).first().or(page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x1iyjqo2').filter({ hasText: /^크리에이티브 설정$/ }).first());
-  const creativeAdPattern = getCreativeFormatPattern(AD_FORMAT);
+  const creativeAdPattern = getCreativeFormatPattern(adFormat);
   const creativeAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: creativeAdPattern }).first();
   const uploadButton = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli').filter({ hasText: /^업로드$/ }).first();
 
@@ -2160,7 +2178,7 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
 
     const openedByCreativeAdMode = await creativeAdTab.isVisible({ timeout: 5000 }).catch(() => false);
     const openedByUpload = await uploadButton.isVisible({ timeout: 5000 }).catch(() => false);
-    console.log('[DEBUG] creative settings opened check:', { AD_FORMAT, openedByCreativeAdMode, openedByUpload });
+    console.log('[DEBUG] creative settings opened check:', { adFormat, openedByCreativeAdMode, openedByUpload });
 
     if (openedByCreativeAdMode && openedByUpload) {
       creativeOpened = true;
@@ -2178,10 +2196,10 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
   }
 
   console.log('[STEP] creative settings opened - selecting ad mode from env');
-  await selectCreativeAdModeWithRequestedClasses(page);
+  await selectCreativeAdModeWithRequestedClasses(page, adFormat);
   await page.waitForTimeout(4000);
 
-  const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(targetAdName)}`;
+  const targetUrl = landingUrl || `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(targetAdName)}`;
   const landingInput = page.locator('input[placeholder="http://www.example.com/page"]').first();
   const landingVisible = await landingInput.isVisible({ timeout: 10000 }).catch(() => false);
   if (landingVisible) {
@@ -2198,8 +2216,8 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
 }
 
 
-async function enterCreativeInsideEditor(page) {
-  console.log('[STEP] creative internal entry started:', { AD_FORMAT, label: getCreativeFormatLabel(AD_FORMAT) });
+async function enterCreativeInsideEditor(page, adFormat = AD_FORMAT) {
+  console.log('[STEP] creative internal entry started:', { adFormat, label: getCreativeFormatLabel(adFormat) });
 
   const creativeSettings = page
     .locator('div.x78zum5.xdt5ytf.x2lwn1j.xeuugli.xkh2ocl')
@@ -2232,12 +2250,12 @@ async function enterCreativeInsideEditor(page) {
     });
     await page.waitForTimeout(6000);
 
-    const creativeFormatVisible = await page.getByText(getCreativeFormatPattern(AD_FORMAT)).first().isVisible({ timeout: 5000 }).catch(() => false);
-    console.log('[DEBUG] creative settings click exposed ad mode:', { attempt, AD_FORMAT, creativeFormatVisible });
+    const creativeFormatVisible = await page.getByText(getCreativeFormatPattern(adFormat)).first().isVisible({ timeout: 5000 }).catch(() => false);
+    console.log('[DEBUG] creative settings click exposed ad mode:', { attempt, adFormat, creativeFormatVisible });
     if (creativeFormatVisible) {
-      await selectCreativeAdModeWithRequestedClasses(page);
+      await selectCreativeAdModeWithRequestedClasses(page, adFormat);
       await page.waitForTimeout(4000);
-      console.log('[STEP] creative settings -> ad mode entry completed:', { AD_FORMAT });
+      console.log('[STEP] creative settings -> ad mode entry completed:', { adFormat });
       return;
     }
   }
@@ -2280,7 +2298,9 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         .evaluate((el) => el.getAttribute('data-id') || el.id || el.querySelector('[data-id]')?.getAttribute('data-id') || '')
         .catch(() => '');
       const rowKey = rowId || `${Math.round(rowBox.x)}:${Math.round(rowBox.y)}:${rowText.slice(0, 80)}`;
-      const targetAdsetName = adsetIndex <= adsetEndIndex ? getAdsetName(adsetIndex) : '';
+      const targetAdsetName = adsetIndex <= adsetEndIndex
+        ? (isBlogMixedCampaign() ? buildBlogAdsetName(adsetIndex, process.env) : getAdsetName(adsetIndex))
+        : '';
       const isAlreadyTargetAdset = targetAdsetName && normalizeText(rowText).includes(normalizeText(targetAdsetName));
       const isAdsetCopy = rowText.includes('광고세트') && rowText.includes('사본');
       const isAdCopy = rowText.includes('새 판매 광고') || rowText.includes('광고 - 사본') || rowText.includes('광고명');
@@ -2330,7 +2350,15 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         const visible = await adNameInput.isVisible({ timeout: 5000 }).catch(() => false);
         if (!visible) continue;
 
-        const targetAdName = getAdName(adCreativeIndex);
+        const blogAdPlan = isBlogMixedCampaign() ? getBlogAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
+        if (isBlogMixedCampaign() && !blogAdPlan) {
+          throw new Error(`BLOG_MIXED ad plan not found for creative sequence ${adCreativeIndex}`);
+        }
+        const targetAdName = blogAdPlan?.name || getAdName(adCreativeIndex);
+        const targetLandingUrl = blogAdPlan?.landingUrl || '';
+        const targetAdFormat = blogAdPlan?.type || AD_FORMAT;
+        const targetAssetPath = blogAdPlan?.assetPath || '';
+
         await adNameInput.click({ force: true });
         await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
         await page.keyboard.press('Backspace');
@@ -2343,16 +2371,34 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           throw new Error(`광고소재명 입력 확인 실패: expected=${targetAdName}, actual=${actualAdName}`);
         }
 
-        // await openCreativeSettingsAndFillLandingUrl(page, targetAdName);
-        await fillLandingUrlOnly(page, targetAdName);
+        console.log('[STEP] ad creative plan:', {
+          campaignMode: CAMPAIGN_MODE,
+          adsetIndex: blogAdPlan?.adsetIndex,
+          adsetName: blogAdPlan?.adsetName,
+          adType: targetAdFormat,
+          targetAdName,
+          targetLandingUrl,
+          targetAssetPath,
+        });
+
+        // await openCreativeSettingsAndFillLandingUrl(page, targetAdName, targetLandingUrl, targetAdFormat);
+        await fillLandingUrlOnly(page, targetAdName, targetLandingUrl);
         await page.waitForTimeout(5000);
         console.log('[STEP] 랜딩 URL 단계 완료 후 안정화 대기 완료:', { targetAdName });
 
-        await enterCreativeInsideEditor(page);
+        await enterCreativeInsideEditor(page, targetAdFormat);
         await page.waitForTimeout(5000);
-        console.log('[STEP] 크리에이티브 설정 -> 이미지 광고 단계 완료 후 안정화 대기 완료:', { targetAdName });
+        console.log('[STEP] creative format step completed:', { targetAdName, targetAdFormat });
 
-        if (adCreativeIndex === 1 && !firstCreativeMediaUploaded) {
+        if (isBlogMixedCampaign()) {
+          await page.waitForTimeout(5000);
+          await attachMediaFromFolderIfConfigured(page, targetAdName, [targetAssetPath], targetAdFormat);
+          console.log('[STEP] BLOG_MIXED media upload completed:', {
+            targetAdName,
+            targetAdFormat,
+            targetAssetPath,
+          });
+        } else if (adCreativeIndex === 1 && !firstCreativeMediaUploaded) {
           await page.waitForTimeout(5000);
           await attachMediaFromFolderIfConfigured(page, targetAdName);
           firstCreativeMediaUploaded = true;
@@ -2438,8 +2484,8 @@ async function runFlow(page) {
   await page.screenshot({ path: PATHS.step4, fullPage: true });
 
   for (let n = 0; n < 1; n += 1) {
-    const index = ADSET_START_INDEX + n;
-    const adsetName = getAdsetName(index);
+    const index = isBlogMixedCampaign() ? n + 1 : ADSET_START_INDEX + n;
+    const adsetName = isBlogMixedCampaign() ? buildBlogAdsetName(index, process.env) : getAdsetName(index);
     console.log(`[STEP] ${n + 1}/1 광고 세트 생성 시작: ${adsetName}`);
 
     await clickRealCreateButton(page);
@@ -2457,14 +2503,18 @@ async function runFlow(page) {
     }
     await fillAdsetDailyBudgetAfterSchedule(page);
 
-    const adCreativeDuplicateCount = Math.max(AD_CREATIVE_COUNT, 0);
+    const adCreativeDuplicateCount = isBlogMixedCampaign()
+      ? Math.max((activeCampaignPlan?.totalAdsPerAdset || 5) - 1, 0)
+      : Math.max(AD_CREATIVE_COUNT, 0);
     if (adCreativeDuplicateCount > 0) {
       await pause(page, '스케줄링 후 새 판매 광고 복제 설정 전 대기', 5000);
       await setDuplicateCount(page, adCreativeDuplicateCount, '새 판매 광고');
       await pause(page, '새 판매 광고 복제 설정 후 대기', 7000);
     }
 
-    const adsetDuplicateCount = Math.max(ADSET_COUNT, 0);
+    const adsetDuplicateCount = isBlogMixedCampaign()
+      ? Math.max((activeCampaignPlan?.adsetCount || ADSET_COUNT) - 1, 0)
+      : Math.max(ADSET_COUNT, 0);
     if (adsetDuplicateCount > 0) {
       await pause(page, '스케줄링 후 광고세트 복제 설정 전 대기', 5000);
       await setDuplicateCount(page, adsetDuplicateCount, adsetName);
@@ -2472,7 +2522,7 @@ async function runFlow(page) {
     }
 
     if (n === 0) {
-      await renameAdsetsAndAdsSequentially(page, ADSET_START_INDEX, ADSET_COUNT, AD_CREATIVE_COUNT);
+      await renameAdsetsAndAdsSequentially(page, isBlogMixedCampaign() ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount);
     }
 
   }
@@ -2483,6 +2533,25 @@ async function runFlow(page) {
 
 async function main() {
   validateEnv();
+  const validation = await validateCampaignConfig(process.env, { baseDir: process.cwd() });
+  activeCampaignPlan = validation.plan;
+  console.log('[CONFIG] campaign mode:', validation.mode);
+
+  if (DRY_RUN) {
+    if (validation.mode === CAMPAIGN_MODES.BLOG_MIXED) {
+      console.log(formatDryRunPlan(activeCampaignPlan));
+    } else {
+      console.log('[DRY RUN] Meta Ads Automation plan');
+      console.log(`campaign mode: ${validation.mode}`);
+      console.log(`campaign name: ${CAMPAIGN_NAME}`);
+      console.log(`adset start index: ${ADSET_START_INDEX}`);
+      console.log(`adset duplicate count: ${ADSET_COUNT}`);
+      console.log(`ad creative duplicate count: ${AD_CREATIVE_COUNT}`);
+      console.log('Meta browser automation skipped because DRY_RUN=true.');
+    }
+    return;
+  }
+
   await ensureDirs();
   console.log(`[OPEN] 기존 Chrome 세션에 CDP attach: ${CDP_URL}`);
   const browser = await chromium.connectOverCDP(CDP_URL);

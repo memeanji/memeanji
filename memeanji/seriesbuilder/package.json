@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "login": "node src/login.js",
-    "open-campaign": "node src/open-campaign.js"
+    "open-campaign": "node src/open-campaign.js",
+    "test": "node --test"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

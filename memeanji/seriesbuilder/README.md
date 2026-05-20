@@ -1,42 +1,225 @@
-# Meta Ads Manager Automation (Playwright + Node.js)
+# Meta Ads Manager Automation
 
-기존 Chrome(CDP attach) 세션을 재사용해서 캠페인 진입 후 광고 세트를 여러 개 자동 생성합니다.
+Playwright와 기존 Chrome CDP 세션을 사용해 Meta Ads Manager 화면을 자동 조작합니다.
 
-## 환경변수
-- `AD_ACCOUNT_ID`
-- `CAMPAIGN_NAME`
-- `ADSET_BASE_NAME` (기본: 리타겟)
-- `ADSET_START_INDEX` (기본: 1)
-- `ADSET_COUNT` (기본: 1)
-- `ADSET_CREATIVE_COUNT` (기본: 5, 또는 `AD_CREATIVE_COUNT`/`ADVERTISE_COUNT`)
-- `ADSET_DAILY_BUDGET` (선택)
-- `CDP_URL` (기본: `http://127.0.0.1:9222`)
-- `SCHEDULE_TIME` (기본: `05:00`)
-- `MEDIA_FOLDER_PATH` (선택)
+현재 프로그램은 두 가지 캠페인 모드를 지원합니다.
 
-## 광고 세트명 규칙
-`MMDD {ADSET_BASE_NAME} {번호}번 광고세트`
-
-예: `0515 리타겟 1번 광고세트`
+- `IMAGE_ONLY`: 기존 이미지 전용 흐름입니다. `CAMPAIGN_MODE`를 비워두거나 `IMAGE_ONLY`로 두면 기존 방식으로 동작합니다.
+- `BLOG_MIXED`: 블로그 캠페인용 흐름입니다. 광고세트 1개당 이미지 광고 4개와 동영상 광고 1개를 구성합니다.
 
 ## 실행
-1. 일반 Chrome을 remote debugging으로 실행
-2. Meta Ads Manager 로그인 상태 유지
-3. `npm run open-campaign`
 
-## 동작
-- 초기 광고세트 1개 생성 후 복제 단계로 확장
-- 캠페인 진입
-- `ADSET_COUNT` 만큼 반복 생성
-- `ADSET_CREATIVE_COUNT` 값만큼 새 판매 광고 복제 (첫 번째 복제 단계)
-- `ADSET_COUNT` 값만큼 광고세트 복제 (두 번째 복제 단계)
-- 각 반복에서 광고 세트 이름 자동 입력
-- 일 예산(ADSET_DAILY_BUDGET) 입력 후 스케줄링 진행
-- `ADSET_DAILY_BUDGET` 설정 시 예산 입력 시도
-- `보기 만들기` 패널 감지 시 닫기
-- 게시는 자동 클릭하지 않고 마지막 `page.pause()`에서 멈춤
+1. Chrome을 remote debugging 모드로 실행합니다.
+2. Meta Ads Manager에 로그인된 상태를 유지합니다.
+3. `.env`를 설정합니다.
+4. 실행합니다.
 
+```bash
+npm run open-campaign
+```
 
-## 빠른 크리에이티브 단계 테스트
-- `QUICK_TEST_CREATIVE_STEP=true`로 설정하면 전체 플로우 없이 크리에이티브 설정/랜딩URL/업로드 단계만 실행합니다.
-- `QUICK_TEST_AD_NAME`으로 미디어 검색용 광고소재명을 지정할 수 있습니다.
+## 공통 환경 변수
+
+```env
+AD_ACCOUNT_ID=
+CAMPAIGN_NAME=
+CAMPAIGN_MODE=IMAGE_ONLY
+DRY_RUN=false
+
+ADSET_START_INDEX=1
+ADSET_COUNT=9
+AD_CREATIVE_COUNT=4
+ADSET_DAILY_BUDGET=100000
+
+CDP_URL=http://127.0.0.1:9222
+SCHEDULE_TIME=05:00
+MEDIA_FOLDER_PATH=
+```
+
+## IMAGE_ONLY 모드
+
+기존 이미지 전용 모드입니다. 기존 `.env`와 호환됩니다.
+
+- 광고세트명은 기존 `MMDD {ADSET_BASE_NAME} {index}번 광고세트` 규칙을 유지합니다.
+- 광고명은 기존 `f_i_o_l_MMDD_XX` 규칙을 유지합니다.
+- 랜딩 URL도 기존 광고명 기반 URL 생성 방식을 유지합니다.
+- 기존 이미지 업로드/검색 흐름을 그대로 사용합니다.
+
+예시:
+
+```env
+CAMPAIGN_MODE=IMAGE_ONLY
+ADSET_START_INDEX=1
+ADSET_COUNT=9
+AD_CREATIVE_COUNT=4
+ADSET_DAILY_BUDGET=100000
+AD_FORMAT=image
+```
+
+## BLOG_MIXED 모드
+
+블로그 캠페인 모드입니다. 광고세트 1개 안에 총 5개 광고가 생성됩니다.
+
+- 1~4번 광고: 이미지 광고
+- 5번 광고: 동영상 광고
+- 광고세트별 랜딩 URL은 반드시 `.env`의 `BLOG_LANDING_URL_N`에서 읽습니다.
+- URL은 광고명이나 광고세트명에서 추론하지 않습니다.
+
+필수 예시:
+
+```env
+CAMPAIGN_MODE=BLOG_MIXED
+DRY_RUN=true
+
+ADSET_COUNT=5
+BLOG_IMAGE_ADS_PER_ADSET=4
+BLOG_VIDEO_ADS_PER_ADSET=1
+BLOG_TOTAL_ADS_PER_ADSET=5
+
+BLOG_ADSET_NAME_PREFIX=f_i_b_o_l
+BLOG_IMAGE_AD_NAME_PREFIX=f_i_b_o_l
+BLOG_VIDEO_AD_NAME_PREFIX=f_v_b_o_l
+
+TIMEZONE=Asia/Seoul
+DATE_FORMAT=YYYYMMDD
+
+BLOG_LANDING_URL_1=https://example.com/landing-1
+BLOG_LANDING_URL_2=https://example.com/landing-2
+BLOG_LANDING_URL_3=https://example.com/landing-3
+BLOG_LANDING_URL_4=https://example.com/landing-4
+BLOG_LANDING_URL_5=https://example.com/landing-5
+
+BLOG_ASSET_ROOT=./assets/blog
+```
+
+## BLOG_MIXED 이름 규칙
+
+날짜는 `TIMEZONE=Asia/Seoul` 기준 오늘 날짜를 `YYYYMMDD`로 계산합니다.
+
+광고세트명:
+
+```text
+f_i_b_o_l_{YYYYMMDD}_{adset_index}
+```
+
+광고명:
+
+```text
+이미지 광고 1: f_i_b_o_l_{YYYYMMDD}_1
+이미지 광고 2: f_i_b_o_l_{YYYYMMDD}_2
+이미지 광고 3: f_i_b_o_l_{YYYYMMDD}_3
+이미지 광고 4: f_i_b_o_l_{YYYYMMDD}_4
+동영상 광고 5: f_v_b_o_l_{YYYYMMDD}_5
+```
+
+위 광고명 규칙은 광고세트마다 반복됩니다.
+
+## 랜딩 URL 매핑
+
+`BLOG_MIXED` 모드에서는 광고세트 인덱스와 랜딩 URL 인덱스가 1:1입니다.
+
+```text
+광고세트 1 -> BLOG_LANDING_URL_1
+광고세트 2 -> BLOG_LANDING_URL_2
+광고세트 3 -> BLOG_LANDING_URL_3
+```
+
+`ADSET_COUNT=5`이면 `BLOG_LANDING_URL_1`부터 `BLOG_LANDING_URL_5`까지 모두 있어야 합니다.
+
+## 소재 입력 방식
+
+기존 프로그램은 폴더 기반 이미지 업로드 흐름을 사용합니다. 그래서 `BLOG_MIXED`도 폴더 기반 매핑을 우선 지원합니다.
+
+기본 폴더 구조:
+
+```text
+assets/blog/
+  adset_1/
+    images/
+      image1.jpg
+      image2.jpg
+      image3.jpg
+      image4.jpg
+    videos/
+      video1.mp4
+  adset_2/
+    images/
+    videos/
+```
+
+환경 변수:
+
+```env
+BLOG_ASSET_ROOT=./assets/blog
+```
+
+광고세트별로 직접 지정할 수도 있습니다.
+
+```env
+BLOG_ADSET_1_IMAGE_DIR=./assets/blog/adset_1/images
+BLOG_ADSET_1_VIDEO_DIR=./assets/blog/adset_1/videos
+
+BLOG_ADSET_2_IMAGE_DIR=./assets/blog/adset_2/images
+BLOG_ADSET_2_VIDEO_DIR=./assets/blog/adset_2/videos
+```
+
+명시적 파일 목록도 지원합니다.
+
+```env
+BLOG_ADSET_1_IMAGE_ASSETS=./assets/blog/adset_1/images/image1.jpg,./assets/blog/adset_1/images/image2.jpg,./assets/blog/adset_1/images/image3.jpg,./assets/blog/adset_1/images/image4.jpg
+BLOG_ADSET_1_VIDEO_ASSET=./assets/blog/adset_1/videos/video1.mp4
+```
+
+이미지 확장자:
+
+```text
+png, jpg, jpeg, webp, gif
+```
+
+동영상 확장자:
+
+```text
+mp4, mov, m4v, webm
+```
+
+## Dry Run
+
+실제 Meta 화면 조작 없이 계획만 검수하려면:
+
+```env
+DRY_RUN=true
+```
+
+출력 내용:
+
+- campaign mode
+- campaign name
+- 생성될 광고세트명
+- 광고세트별 landing URL
+- 이미지 광고 4개 이름과 소재
+- 동영상 광고 1개 이름과 소재
+- creative type
+
+## 자주 나는 에러
+
+`Missing BLOG_LANDING_URL_3. BLOG_MIXED mode requires one landing URL per adset.`
+
+`ADSET_COUNT`가 3 이상인데 `BLOG_LANDING_URL_3`이 없습니다. `.env`에 추가하세요.
+
+`BLOG_MIXED requires exactly 4 image assets for adset 1. Found 3.`
+
+광고세트 1 이미지 폴더에 이미지가 4개가 아닙니다. 정확히 4개를 넣으세요.
+
+`BLOG_MIXED requires exactly 1 video asset for adset 1.`
+
+광고세트 1 동영상 폴더에 지원되는 동영상 파일이 없습니다.
+
+`Invalid video asset ... Allowed: mp4, mov, m4v, webm.`
+
+동영상 확장자가 지원 목록에 없습니다.
+
+## 테스트
+
+```bash
+npm test
+```
