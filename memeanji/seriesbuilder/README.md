@@ -18,6 +18,41 @@ Playwright와 기존 Chrome CDP 세션을 사용해 Meta Ads Manager 화면을 �
 npm run open-campaign
 ```
 
+## Streamlit MVP
+
+터미널 명령을 직접 입력하지 않고 MVP 웹 UI에서 관리할 수 있습니다.
+
+처음 한 번:
+
+```bash
+pip install -r requirements.txt
+```
+
+실행:
+
+```bash
+python -m streamlit run streamlit_app.py
+```
+
+또는 Windows에서:
+
+```bat
+run-streamlit.cmd
+```
+
+Streamlit MVP에서 할 수 있는 일:
+
+- `git pull origin main`
+- `npm install`
+- `.env` 저장 및 VS Code로 열기
+- 캠페인 유형 선택: `BLOG_MIXED` 또는 `IMAGE_ONLY`
+- 캠페인 유형에 따른 입력 항목 활성화
+- `BLOG_MIXED` 랜딩 URL을 광고세트 수만큼 입력
+- 바탕화면 `F_I_B_O_L_MMDD` 소재 루트 폴더 설정
+- dry-run 실행
+- Chrome CDP 실행
+- 실제 자동화 PowerShell 실행
+
 ## 공통 환경 변수
 
 ```env
