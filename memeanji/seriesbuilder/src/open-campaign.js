@@ -12,6 +12,8 @@ const ADSET_COUNT = Number(process.env.ADSET_COUNT || process.env.adset_count ||
 const AD_CREATIVE_COUNT = Number(process.env.ADSET_CREATIVE_COUNT || process.env.AD_CREATIVE_COUNT || process.env.ADVERTISE_COUNT || 5);
 const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
 const SCHEDULE_TIME = process.env.SCHEDULE_TIME || '05:00';
+const ADSET_DAILY_BUDGET = String(process.env.ADSET_DAILY_BUDGET || '').trim();
+const AD_FORMAT = normalizeAdFormat(process.env.AD_FORMAT || process.env.AD_CREATIVE_FORMAT || process.env.AD_MEDIA_TYPE || 'image');
 const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 const QUICK_TEST_CREATIVE_STEP = String(process.env.QUICK_TEST_CREATIVE_STEP || '').toLowerCase() === 'true';
 const QUICK_TEST_AD_NAME = process.env.QUICK_TEST_AD_NAME || getAdName(1);
@@ -39,10 +41,25 @@ function validateEnv() {
   if (!Number.isFinite(ADSET_START_INDEX)) throw new Error('ADSET_START_INDEX must be a number');
   if (!Number.isFinite(ADSET_COUNT) || ADSET_COUNT < 1) throw new Error('ADSET_COUNT must be >= 1');
   if (!Number.isFinite(AD_CREATIVE_COUNT) || AD_CREATIVE_COUNT < 1) throw new Error('AD_CREATIVE_COUNT must be >= 1');
+  if (ADSET_DAILY_BUDGET && !/^\d+(\.\d+)?$/.test(ADSET_DAILY_BUDGET)) throw new Error('ADSET_DAILY_BUDGET must be a number');
 }
 
 function normalizeText(value) {
   return value.replace(/\s+/g, '').toLowerCase();
+}
+
+function normalizeAdFormat(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['video', 'movie', '동영상', '영상'].includes(normalized)) return 'video';
+  return 'image';
+}
+
+function getCreativeFormatLabel(format = AD_FORMAT) {
+  return format === 'video' ? '동영상 광고' : '이미지 광고';
+}
+
+function getCreativeFormatPattern(format = AD_FORMAT) {
+  return format === 'video' ? /동영상 광고/ : /이미지 광고/;
 }
 
 function campaignPatternFromInput(value) {
@@ -413,6 +430,90 @@ async function updateDateAndTimeBeforeContinue(page) {
 
   console.log('[DEBUG] schedule target time applied:', targetTimeText);
 
+  return true;
+}
+
+async function fillInputHandle(page, inputHandle, value, label) {
+  await inputHandle.asElement().click();
+  await page.waitForTimeout(300);
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type(value, { delay: 50 });
+  await page.waitForTimeout(800);
+
+  let actualValue = await inputHandle.evaluate((el) => el.value || '').catch(() => '');
+  if (actualValue !== value) {
+    await inputHandle.evaluate((el, nextValue) => {
+      el.focus();
+      el.value = nextValue;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, value);
+    await page.waitForTimeout(800);
+    actualValue = await inputHandle.evaluate((el) => el.value || '').catch(() => '');
+  }
+
+  console.log(`[DEBUG] ${label} input value:`, { expected: value, actual: actualValue });
+  return actualValue === value;
+}
+
+async function findBudgetInputHandle(page) {
+  const placeholderInput = page.locator('input[placeholder="금액을 입력하세요"]').first();
+  if (await placeholderInput.isVisible({ timeout: 3000 }).catch(() => false)) {
+    return placeholderInput.elementHandle();
+  }
+
+  const labelledInput = page.locator('input[aria-labelledby="js_dte js_dtr"]').first();
+  if (await labelledInput.isVisible({ timeout: 3000 }).catch(() => false)) {
+    return labelledInput.elementHandle();
+  }
+
+  const inputs = await page.locator('input').elementHandles();
+  for (const input of inputs) {
+    const placeholder = await input.getAttribute('placeholder').catch(() => '');
+    const ariaLabelledBy = await input.getAttribute('aria-labelledby').catch(() => '');
+    const value = await input.getAttribute('value').catch(() => '');
+    console.log('[DEBUG] budget input candidate:', { placeholder, ariaLabelledBy, value });
+
+    if (placeholder === '금액을 입력하세요' || ariaLabelledBy === 'js_dte js_dtr') {
+      return input;
+    }
+  }
+
+  return null;
+}
+
+async function fillAdsetDailyBudgetAfterSchedule(page) {
+  if (!ADSET_DAILY_BUDGET) {
+    console.log('[STEP] ADSET_DAILY_BUDGET empty - budget input skipped');
+    return true;
+  }
+
+  await pause(page, 'schedule applied before budget input', 3000);
+
+  const budgetStrategyLabel = page
+    .locator('span.x1vvvo52.x1fvot60.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.x117nqv4.xeuugli')
+    .filter({ hasText: /예산 전략/ })
+    .first()
+    .or(page.getByText(/예산 전략/).first());
+
+  const budgetStrategyVisible = await budgetStrategyLabel.isVisible({ timeout: 3000 }).catch(() => false);
+  console.log('[DEBUG] budget strategy label visible:', budgetStrategyVisible);
+
+  const budgetInputHandle = await findBudgetInputHandle(page);
+  if (!budgetInputHandle) {
+    await debugDump(page, 'daily budget input not found');
+    await page.screenshot({ path: path.join(DIRS.screenshots, 'daily-budget-input-not-found.png'), fullPage: true });
+    throw new Error('ADSET_DAILY_BUDGET input not found after schedule step');
+  }
+
+  const filled = await fillInputHandle(page, budgetInputHandle, ADSET_DAILY_BUDGET, 'daily budget');
+  if (!filled) {
+    await debugDump(page, 'daily budget input fill mismatch');
+    throw new Error(`ADSET_DAILY_BUDGET fill failed: expected=${ADSET_DAILY_BUDGET}`);
+  }
+
+  await pause(page, 'daily budget input applied', 2000);
   return true;
 }
 
@@ -990,6 +1091,136 @@ async function selectImageAdModeWithRequestedClasses(page) {
   throw new Error('이미지 광고 버튼을 찾거나 클릭하지 못했습니다.');
 }
 
+async function selectVideoAdModeWithRequestedClasses(page) {
+  console.log('[STEP] video ad button selection started');
+
+  const adLabel = getCreativeFormatLabel('video');
+  const adPattern = getCreativeFormatPattern('video');
+  const surfaceWrapper = page.locator('span[data-surface-wrapper="1"]').first();
+  const requestedWrapper = page
+    .locator('div.x6s0dn4.x1q0g3np.xozqiw3.x2lwn1j.x1iyjqo2.xs83m0k.x1xsc7gk.x78zum5.xeuugli')
+    .filter({ hasText: adPattern })
+    .first();
+
+  const requestedLabel = page
+    .locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2')
+    .filter({ hasText: new RegExp(`^${adLabel}$`) })
+    .first();
+
+  const requestedIconOrButton = page
+    .locator('div.x6s0dn4.x78zum5.x1q0g3np.xozqiw3.x2lwn1j.xeuugli.x1iyjqo2.x8va1my.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x1y1aw1k.xwib8y2.xmzvs34.xf159sx.xo1l8bm.xbsr9hj.x1v911su')
+    .filter({ hasText: adPattern })
+    .first();
+
+  const longClassButton = page
+    .locator('div.x1i10hfl.xjqpnuy.xc5r6h4.xqeqjp1.x1phubyo.x972fbf.x10w94by.x1qhh985.x14e42zd.x9f619.x1ypdohk.x3ct3a4.xdj266r.x14z9mp.xat24cr.x1lziwak.x2lwn1j.xeuugli.x16tdsg8.xggy1nq.x1ja2u2z.x6s0dn4.x1ejq31n.x18oe1m7.x1sy0etr.xstzfhl.x3nfvp2.xdl72j9.x1q0g3np.x2lah0s.x193iq5w.x1n2onr6.x1hl2dhg.x87ps6o.xxymvpz.xlh3980.xvmahel.x1lku1pv.x1g40iwv.x1g2r6go.x16e9yqp.x12w9bfk.x15406qy.xjwep3j.x1t39747.x1wcsgtt.x1pczhz8.x1ob88yx.xaatb59.x1qgsegg.xo1l8bm.xbsr9hj.x1v911su.x1y1aw1k.xwib8y2.xv54qhq.x1g0dm76')
+    .filter({ hasText: adPattern })
+    .first();
+
+  const presentationArea = page
+    .locator('div[role="presentation"].x3nfvp2.x120ccyz.x1heor9g.x2lah0s.x1c4vz4f')
+    .first();
+
+  const uploadButton = page
+    .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
+    .filter({ hasText: /^업로드$/ })
+    .first()
+    .or(page.getByRole('button', { name: /^업로드$/ }).first())
+    .or(page.getByText(/^업로드$/).first());
+
+  const candidates = [
+    { name: 'requested long button class', locator: longClassButton },
+    { name: 'requested icon/button class', locator: requestedIconOrButton },
+    { name: 'requested wrapper row', locator: requestedWrapper },
+    { name: 'requested video label', locator: requestedLabel },
+    {
+      name: 'role menuitem text',
+      locator: page.getByRole('menuitem', { name: adPattern }).first(),
+    },
+    {
+      name: 'role button text',
+      locator: page.getByRole('button', { name: adPattern }).first(),
+    },
+    {
+      name: 'plain text',
+      locator: page.getByText(new RegExp(`^${adLabel}$`)).first(),
+    },
+  ];
+
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    console.log(`[STEP] video ad button click attempt ${attempt}/12`);
+
+    const surfaceVisible = await surfaceWrapper.isVisible({ timeout: 1000 }).catch(() => false);
+    const wrapperVisible = await requestedWrapper.isVisible({ timeout: 2000 }).catch(() => false);
+    const labelVisible = await requestedLabel.isVisible({ timeout: 2000 }).catch(() => false);
+    const presentationVisible = await presentationArea.isVisible({ timeout: 1000 }).catch(() => false);
+    const uploadVisible = await uploadButton.isVisible({ timeout: 1000 }).catch(() => false);
+    console.log('[DEBUG] video ad button candidate state:', {
+      attempt,
+      surfaceVisible,
+      wrapperVisible,
+      labelVisible,
+      presentationVisible,
+      uploadVisible,
+    });
+
+    if (surfaceVisible && (presentationVisible || uploadVisible)) {
+      console.log('[STEP] video ad internal surface confirmed');
+      return;
+    }
+
+    for (const candidate of candidates) {
+      const visible = await candidate.locator.isVisible({ timeout: 1500 }).catch(() => false);
+      if (!visible) continue;
+
+      await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
+      await page.waitForTimeout(1000);
+
+      const box = await candidate.locator.boundingBox().catch(() => null);
+      console.log('[DEBUG] video ad click candidate:', { attempt, name: candidate.name, box });
+
+      let clicked = false;
+      await candidate.locator.click({ force: true }).then(() => { clicked = true; }).catch(async () => {
+        if (box) {
+          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+          clicked = true;
+        }
+      });
+
+      if (!clicked) continue;
+
+      await page.waitForTimeout(5000);
+      const enteredSurface = await surfaceWrapper.isVisible({ timeout: 2000 }).catch(() => false);
+      const uploadVisibleAfterClick = await uploadButton.isVisible({ timeout: 3000 }).catch(() => false);
+      console.log('[DEBUG] video ad click result:', {
+        attempt,
+        candidate: candidate.name,
+        enteredSurface,
+        uploadVisible: uploadVisibleAfterClick,
+      });
+
+      console.log('[STEP] video ad button click completed');
+      return;
+    }
+
+    await page.waitForTimeout(4000);
+  }
+
+  await debugDump(page, 'video ad button not clicked');
+  throw new Error('동영상 광고 버튼을 찾거나 클릭하지 못했습니다.');
+}
+
+async function selectCreativeAdModeWithRequestedClasses(page) {
+  const label = getCreativeFormatLabel(AD_FORMAT);
+  console.log('[STEP] creative ad mode selected from env:', { AD_FORMAT, label });
+  if (AD_FORMAT === 'video') {
+    await selectVideoAdModeWithRequestedClasses(page);
+    return;
+  }
+
+  await selectImageAdModeWithRequestedClasses(page);
+}
+
 async function attachMediaFromFolderIfConfigured(page, targetAdName) {
   const desktopRoot = path.join(process.env.USERPROFILE || process.env.HOME || '.', 'Desktop');
   const targetFolderName = targetAdName.replace(/_\\d+$/, '');
@@ -1005,11 +1236,15 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName) {
   }
 
   async function collectUploadFiles(rootPath) {
+    const mediaPattern = AD_FORMAT === 'video'
+      ? /\.(mp4|mov|m4v|webm)$/i
+      : /\.(png|jpe?g|webp|gif)$/i;
+
     const entries = await fs.readdir(rootPath, { withFileTypes: true });
     return entries
       .filter((e) => e.isFile())
       .map((e) => path.join(rootPath, e.name))
-      .filter((f) => /\.(png|jpe?g|webp|gif)$/i.test(f));
+      .filter((f) => mediaPattern.test(f));
   }
 
   async function findExactMediaFolder() {
@@ -1877,7 +2112,8 @@ async function fillLandingUrlOnly(page, targetAdName) {
 
 async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
   const creativeSettings = page.locator('div.x78zum5.xdt5ytf.x2lwn1j.xeuugli.xkh2ocl').filter({ hasText: /크리에이티브 설정/ }).first().or(page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x1iyjqo2').filter({ hasText: /^크리에이티브 설정$/ }).first());
-  const imageAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: /^이미지 광고$/ }).first();
+  const creativeAdPattern = getCreativeFormatPattern(AD_FORMAT);
+  const creativeAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: creativeAdPattern }).first();
   const uploadButton = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli').filter({ hasText: /^업로드$/ }).first();
 
   let creativeOpened = false;
@@ -1911,9 +2147,9 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
         await page.mouse.click(pt.x, pt.y).catch(() => null);
         await page.waitForTimeout(2000);
 
-        const checkImage = await imageAdTab.isVisible({ timeout: 1000 }).catch(() => false);
+        const checkCreativeAdMode = await creativeAdTab.isVisible({ timeout: 1000 }).catch(() => false);
         const checkUpload = await uploadButton.isVisible({ timeout: 1000 }).catch(() => false);
-        if (checkImage || checkUpload) {
+        if (checkCreativeAdMode || checkUpload) {
           clicked = true;
           break;
         }
@@ -1922,11 +2158,11 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
 
     await page.waitForTimeout(7000);
 
-    const openedByImage = await imageAdTab.isVisible({ timeout: 5000 }).catch(() => false);
+    const openedByCreativeAdMode = await creativeAdTab.isVisible({ timeout: 5000 }).catch(() => false);
     const openedByUpload = await uploadButton.isVisible({ timeout: 5000 }).catch(() => false);
-    console.log('[DEBUG] 크리에이티브 설정 진입 판정:', { openedByImage, openedByUpload });
+    console.log('[DEBUG] creative settings opened check:', { AD_FORMAT, openedByCreativeAdMode, openedByUpload });
 
-    if (openedByImage && openedByUpload) {
+    if (openedByCreativeAdMode && openedByUpload) {
       creativeOpened = true;
       console.log('[STEP] 크리에이티브 설정 진입 성공');
       break;
@@ -1941,8 +2177,8 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
     throw new Error('크리에이티브 설정 진입 실패: 이미지 광고/업로드 확인 불가');
   }
 
-  console.log('[STEP] 크리에이티브 설정 진입 후 이미지 광고 선택 단계 시작');
-  await selectImageAdModeWithRequestedClasses(page);
+  console.log('[STEP] creative settings opened - selecting ad mode from env');
+  await selectCreativeAdModeWithRequestedClasses(page);
   await page.waitForTimeout(4000);
 
   const targetUrl = `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(targetAdName)}`;
@@ -1963,7 +2199,7 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName) {
 
 
 async function enterCreativeInsideEditor(page) {
-  console.log('[STEP] 크리에이티브 내부 진입 시작 (설정 버튼 -> 이미지 광고)');
+  console.log('[STEP] creative internal entry started:', { AD_FORMAT, label: getCreativeFormatLabel(AD_FORMAT) });
 
   const creativeSettings = page
     .locator('div.x78zum5.xdt5ytf.x2lwn1j.xeuugli.xkh2ocl')
@@ -1996,12 +2232,12 @@ async function enterCreativeInsideEditor(page) {
     });
     await page.waitForTimeout(6000);
 
-    const imageVisible = await page.getByText(/^이미지 광고$/).first().isVisible({ timeout: 5000 }).catch(() => false);
-    console.log('[DEBUG] 크리에이티브 설정 클릭 후 이미지 광고 표시:', { attempt, imageVisible });
-    if (imageVisible) {
-      await selectImageAdModeWithRequestedClasses(page);
+    const creativeFormatVisible = await page.getByText(getCreativeFormatPattern(AD_FORMAT)).first().isVisible({ timeout: 5000 }).catch(() => false);
+    console.log('[DEBUG] creative settings click exposed ad mode:', { attempt, AD_FORMAT, creativeFormatVisible });
+    if (creativeFormatVisible) {
+      await selectCreativeAdModeWithRequestedClasses(page);
       await page.waitForTimeout(4000);
-      console.log('[STEP] 크리에이티브 설정 -> 이미지 광고 진입 완료');
+      console.log('[STEP] creative settings -> ad mode entry completed:', { AD_FORMAT });
       return;
     }
   }
@@ -2219,6 +2455,7 @@ async function runFlow(page) {
     if (!scheduleReady) {
       throw new Error('스케줄링 영역 확인 실패: 날짜 input을 찾지 못했습니다.');
     }
+    await fillAdsetDailyBudgetAfterSchedule(page);
 
     const adCreativeDuplicateCount = Math.max(AD_CREATIVE_COUNT, 0);
     if (adCreativeDuplicateCount > 0) {
